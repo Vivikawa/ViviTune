@@ -8,5 +8,6 @@
     <Reference Include="System.Web.Extensions" />
     <Compile Include="..\ViviTune\Settings.cs" Link="Settings.cs" />
     <Compile Include="..\ViviTune\ConfigBuilder.cs" Link="ConfigBuilder.cs" />
+    <Compile Include="..\ViviTune\ProxyProbe.cs" Link="ProxyProbe.cs" />
   </ItemGroup>
 </Project>

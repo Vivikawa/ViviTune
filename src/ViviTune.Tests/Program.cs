@@ -2,6 +2,9 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using ViviTune;
 
@@ -19,6 +22,7 @@ static class Program
     {
         SettingsTests();
         ConfigTests();
+        ProbeTests();
         return failures == 0 ? 0 : 1;
     }
 
@@ -102,5 +106,48 @@ static class Program
         bool threw = false;
         try { ConfigBuilder.Build(new Settings()); } catch (InvalidOperationException) { threw = true; }
         Check(threw, "Build: пустой список приложений -> исключение (иначе правило без условий матчит всё)");
+    }
+
+    // Фейковый SOCKS5-сервер: на каждое соединение отвечает заданными байтами.
+    static int FakeServer(byte[] methodReply, byte[] udpReply)
+    {
+        var l = new TcpListener(IPAddress.Loopback, 0);
+        l.Start();
+        Task.Run(() =>
+        {
+            using (var c = l.AcceptTcpClient())
+            {
+                var st = c.GetStream();
+                var buf = new byte[16];
+                st.Read(buf, 0, 3);
+                st.Write(methodReply, 0, methodReply.Length);
+                if (udpReply == null) return;
+                st.Read(buf, 0, 10);
+                st.Write(udpReply, 0, udpReply.Length);
+            }
+            l.Stop();
+        });
+        return ((IPEndPoint)l.LocalEndpoint).Port;
+    }
+
+    static void ProbeTests()
+    {
+        var ok = new byte[] { 5, 0, 0, 1, 0, 0, 0, 0, 0, 0 };
+        var r = ProxyProbe.Probe("127.0.0.1", FakeServer(new byte[] { 5, 0 }, ok));
+        Check(r.Reachable && r.UdpSupported, "Probe: SOCKS5 с UDP");
+
+        var noUdp = new byte[] { 5, 7, 0, 1, 0, 0, 0, 0, 0, 0 };
+        r = ProxyProbe.Probe("127.0.0.1", FakeServer(new byte[] { 5, 0 }, noUdp));
+        Check(r.Reachable && !r.UdpSupported, "Probe: SOCKS5 без UDP");
+
+        r = ProxyProbe.Probe("127.0.0.1", FakeServer(new byte[] { 0x48, 0x54 }, null));
+        Check(!r.Reachable && r.Error != null, "Probe: не SOCKS5 -> Reachable=false с текстом ошибки");
+
+        var l = new TcpListener(IPAddress.Loopback, 0);
+        l.Start();
+        int closed = ((IPEndPoint)l.LocalEndpoint).Port;
+        l.Stop();
+        r = ProxyProbe.Probe("127.0.0.1", closed);
+        Check(!r.Reachable && r.Error != null, "Probe: закрытый порт -> Reachable=false с текстом ошибки");
     }
 }
