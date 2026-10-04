@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Net;
 using System.Net.Sockets;
 
 namespace ViviTune
@@ -18,9 +19,11 @@ namespace ViviTune
             var r = new ProbeResult();
             try
             {
-                using (var c = new TcpClient())
+                IPAddress addr;
+                if (!IPAddress.TryParse(ip, out addr)) { r.Error = "некорректный IP"; return r; }
+                using (var c = new TcpClient(addr.AddressFamily))
                 {
-                    if (!c.ConnectAsync(ip, port).Wait(timeoutMs)) { r.Error = "таймаут подключения"; return r; }
+                    if (!c.ConnectAsync(addr, port).Wait(timeoutMs)) { r.Error = "таймаут подключения"; return r; }
                     c.ReceiveTimeout = c.SendTimeout = timeoutMs;
                     var st = c.GetStream();
 

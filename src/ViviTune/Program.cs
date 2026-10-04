@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace ViviTune
@@ -8,9 +9,14 @@ namespace ViviTune
         [STAThread]
         static void Main()
         {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainForm());
+            bool created;
+            using (var m = new Mutex(true, "ViviTune.SingleInstance", out created))
+            {
+                if (!created) { MessageBox.Show("ViviTune уже запущен"); return; }
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                Application.Run(new MainForm());
+            }
         }
     }
 }

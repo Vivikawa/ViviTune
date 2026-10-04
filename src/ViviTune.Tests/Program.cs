@@ -109,9 +109,9 @@ static class Program
     }
 
     // Фейковый SOCKS5-сервер: на каждое соединение отвечает заданными байтами.
-    static int FakeServer(byte[] methodReply, byte[] udpReply)
+    static int FakeServer(byte[] methodReply, byte[] udpReply, IPAddress bind = null)
     {
-        var l = new TcpListener(IPAddress.Loopback, 0);
+        var l = new TcpListener(bind ?? IPAddress.Loopback, 0);
         l.Start();
         Task.Run(() =>
         {
@@ -142,6 +142,13 @@ static class Program
 
         r = ProxyProbe.Probe("127.0.0.1", FakeServer(new byte[] { 0x48, 0x54 }, null));
         Check(!r.Reachable && r.Error != null, "Probe: не SOCKS5 -> Reachable=false с текстом ошибки");
+
+        if (Socket.OSSupportsIPv6)
+        {
+            r = ProxyProbe.Probe("::1", FakeServer(new byte[] { 5, 0 }, ok, IPAddress.IPv6Loopback));
+            Check(r.Reachable && r.UdpSupported, "Probe: IPv6-прокси (::1)");
+        }
+        else Console.WriteLine("skip: IPv6 loopback недоступен");
 
         var l = new TcpListener(IPAddress.Loopback, 0);
         l.Start();

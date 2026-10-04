@@ -25,17 +25,17 @@ namespace ViviTune
             var cidr = ip + (ip.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32");
 
             var config = D(
-                "log", D("level", "info", "timestamp", true),
+                "log", D("level", "warn", "timestamp", true),
                 "dns", D(
                     "servers", new object[]
                     {
                         D("type", "local", "tag", "local"),
-                        D("type", "udp", "tag", "proxy-dns", "server", "1.1.1.1", "detour", "proxy")
+                        D("type", "tcp", "tag", "proxy-dns", "server", "1.1.1.1", "detour", "proxy")
                     },
                     "rules", new object[] { D("process_name", names, "server", "proxy-dns") }),
                 "inbounds", new object[]
                 {
-                    D("type", "tun", "tag", "tun-in", "address", new object[] { "172.19.0.1/30" }, "auto_route", true, "strict_route", false)
+                    D("type", "tun", "tag", "tun-in", "address", new object[] { "172.19.0.1/30", "fdfe:dcba:9876::1/126" }, "auto_route", true, "strict_route", false)
                 },
                 "outbounds", new object[]
                 {

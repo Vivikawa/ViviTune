@@ -57,7 +57,7 @@ C# WinForms, .NET Framework 4.8 (есть в Windows 10/11, ничего уст�
   4. `{"process_name": [<имена выбранных .exe>], "outbound": "proxy"}`
 - `route.final: "direct"`, `route.auto_detect_interface: true`,
   `route.default_domain_resolver: "local"`.
-- `dns.servers`: `local` (`type: local`) и `proxy-dns` (`type: udp`, `server: 1.1.1.1`,
+- `dns.servers`: `local` (`type: local`) и `proxy-dns` (`type: tcp`, `server: 1.1.1.1`,
   `detour: "proxy"`).
 - `dns.rules`: `{"process_name": [<те же имена>], "server": "proxy-dns"}`; DNS остальных процессов
   идёт через `local`.

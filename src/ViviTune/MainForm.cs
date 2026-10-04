@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -24,7 +25,7 @@ namespace ViviTune
         readonly Label _status = new Label { Bounds = new Rectangle(12, 276, 488, 20) };
         readonly TextBox _log = new TextBox { Bounds = new Rectangle(12, 302, 488, 216), Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
 
-        bool _busy; // идёт проверка прокси
+        bool _busy, _stopping; // идёт проверка прокси
 
         public MainForm()
         {
@@ -55,24 +56,39 @@ namespace ViviTune
             };
             _toggle.Click += (a, b) => Toggle();
             _runner.Line += l => UI(() => Log(l));
-            _runner.Exited += () => UI(() => { Log("sing-box завершился"); SetRunning(false); });
+            _runner.Exited += () => UI(() =>
+            {
+                Log("sing-box завершился");
+                bool unexpected = !_stopping;
+                _stopping = false;
+                SetRunning(false);
+                if (unexpected) _status.Text = "sing-box завершился, прокси не работает";
+            });
             FormClosing += (a, b) => _runner.Dispose();
 
-            Changed();
+            Changed(false);
         }
 
         void UI(Action a) { if (IsHandleCreated && !IsDisposed) BeginInvoke(a); }
 
-        void Log(string line) { _log.AppendText(line + Environment.NewLine); }
+        void Log(string line)
+        {
+            _log.AppendText(line + Environment.NewLine);
+            if (_log.Lines.Length > 500) // AppendText игнорирует MaxLength, режем вручную
+            {
+                var l = _log.Lines;
+                _log.Lines = l.Skip(l.Length - 500).ToArray();
+            }
+        }
 
         // Копирует поля в настройки, сохраняет, обновляет доступность кнопки и статус.
-        void Changed()
+        void Changed(bool save = true)
         {
             _s.Ip = _ip.Text.Trim();
             _s.Port = (int)_port.Value;
             _s.Apps = new System.Collections.Generic.List<string>();
             foreach (var a in _apps.Items) _s.Apps.Add((string)a);
-            _s.Save(SettingsPath);
+            if (save) try { _s.Save(SettingsPath); } catch (Exception) { /* папка недоступна для записи: работаем без сохранения */ }
 
             var err = _s.Validate();
             _toggle.Enabled = _runner.Running || (!_busy && err == null);
@@ -88,7 +104,7 @@ namespace ViviTune
 
         void Toggle()
         {
-            if (_runner.Running) { _runner.Stop(); return; } // событие Exited вернёт интерфейс в исходное состояние
+            if (_runner.Running) { _stopping = true; _runner.Stop(); return; } // событие Exited вернёт интерфейс в исходное состояние
             if (!File.Exists(SingBox)) { _status.Text = "Не найден sing-box.exe рядом с программой"; return; }
 
             _busy = true;
@@ -118,6 +134,7 @@ namespace ViviTune
             {
                 File.WriteAllText(ConfigPath, ConfigBuilder.Build(snap));
                 _runner.Start(ConfigPath);
+                Log("Перезапустите выбранные приложения: уже открытые соединения остаются прямыми.");
                 _busy = false;
                 SetRunning(true);
             }
