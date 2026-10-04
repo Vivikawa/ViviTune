@@ -1,0 +1,5 @@
+bin/
+obj/
+.superpowers/
+src/ViviTune/third_party/
+*.user
