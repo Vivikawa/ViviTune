@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Prefer32Bit>false</Prefer32Bit>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Web.Extensions" />
+    <None Include="third_party\sing-box.exe" Condition="Exists('third_party\sing-box.exe')" CopyToOutputDirectory="PreserveNewest" Link="sing-box.exe" />
+  </ItemGroup>
+</Project>
