@@ -24,6 +24,8 @@ namespace ViviTune
         readonly Label _status = new Label { Bounds = new Rectangle(12, 276, 488, 20) };
         readonly TextBox _log = new TextBox { Bounds = new Rectangle(12, 302, 488, 216), Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
 
+        bool _busy; // идёт проверка прокси
+
         public MainForm()
         {
             Text = "ViviTune";
@@ -73,13 +75,13 @@ namespace ViviTune
             _s.Save(SettingsPath);
 
             var err = _s.Validate();
-            _toggle.Enabled = _runner.Running || err == null;
-            _status.Text = err ?? (_runner.Running ? "Работает" : "Готово");
+            _toggle.Enabled = _runner.Running || (!_busy && err == null);
+            if (!_busy) _status.Text = err ?? (_runner.Running ? "Работает" : "Готово");
         }
 
         void SetRunning(bool running)
         {
-            _ip.Enabled = _port.Enabled = _add.Enabled = _remove.Enabled = !running;
+            _ip.Enabled = _port.Enabled = _apps.Enabled = _add.Enabled = _remove.Enabled = !running;
             _toggle.Text = running ? "Стоп" : "Старт";
             Changed();
         }
@@ -89,27 +91,39 @@ namespace ViviTune
             if (_runner.Running) { _runner.Stop(); return; } // событие Exited вернёт интерфейс в исходное состояние
             if (!File.Exists(SingBox)) { _status.Text = "Не найден sing-box.exe рядом с программой"; return; }
 
+            _busy = true;
             _toggle.Enabled = false;
+            _ip.Enabled = _port.Enabled = _apps.Enabled = _add.Enabled = _remove.Enabled = false;
             _status.Text = "Проверяю прокси…";
-            string ip = _s.Ip;
-            int port = _s.Port;
-            Task.Run(() => ProxyProbe.Probe(ip, port)).ContinueWith(t => UI(() => OnProbed(t.Result)));
+            var snap = new Settings { Ip = _s.Ip, Port = _s.Port, Apps = new System.Collections.Generic.List<string>(_s.Apps) };
+            Task.Run(() => ProxyProbe.Probe(snap.Ip, snap.Port)).ContinueWith(t => UI(() =>
+            {
+                if (t.IsFaulted) Fail("Ошибка проверки прокси: " + t.Exception.GetBaseException().Message);
+                else OnProbed(snap, t.Result);
+            }));
         }
 
-        void OnProbed(ProbeResult r)
+        void Fail(string msg)
         {
-            if (!r.Reachable) { _status.Text = "Прокси недоступен: " + r.Error; _toggle.Enabled = true; return; }
+            _busy = false;
+            SetRunning(false);
+            _status.Text = msg;
+        }
+
+        void OnProbed(Settings snap, ProbeResult r)
+        {
+            if (!r.Reachable) { Fail("Прокси недоступен: " + r.Error); return; }
             if (!r.UdpSupported) Log("ВНИМАНИЕ: UDP через этот прокси не работает: игры и голосовая связь могут не заработать.");
             try
             {
-                File.WriteAllText(ConfigPath, ConfigBuilder.Build(_s));
+                File.WriteAllText(ConfigPath, ConfigBuilder.Build(snap));
                 _runner.Start(ConfigPath);
+                _busy = false;
                 SetRunning(true);
             }
             catch (Exception e)
             {
-                _status.Text = "Не удалось запустить: " + e.Message;
-                _toggle.Enabled = true;
+                Fail("Не удалось запустить: " + e.Message);
             }
         }
     }
