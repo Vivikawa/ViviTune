@@ -15,7 +15,12 @@ namespace ViviTune
 
         public static Settings Load(string path)
         {
-            try { return new JavaScriptSerializer().Deserialize<Settings>(File.ReadAllText(path)) ?? new Settings(); }
+            try
+            {
+                var s = new JavaScriptSerializer().Deserialize<Settings>(File.ReadAllText(path)) ?? new Settings();
+                if (s.Apps == null) s.Apps = new List<string>();
+                return s;
+            }
             catch { return new Settings(); } // ponytail: нет файла или он битый: молча берём значения по умолчанию
         }
 

@@ -33,10 +33,11 @@ namespace ViviTune
                 WorkingDirectory = Path.GetDirectoryName(configPath)
             };
             var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            DataReceivedEventHandler onLine = (s, e) => { if (e.Data != null) Raise(Line, e.Data); };
+            DataReceivedEventHandler onLine = (s, e) => { if (e.Data != null) Line?.Invoke(e.Data); };
             p.OutputDataReceived += onLine;
             p.ErrorDataReceived += onLine;
-            p.Exited += (s, e) => { var h = Exited; if (h != null) h(); };
+            p.Exited += (s, e) => Exited?.Invoke();
+            if (_p != null) _p.Dispose(); // предыдущий запуск уже завершён (UI не даёт стартовать дважды)
             p.Start();
             AssignProcessToJobObject(_job, p.Handle); // sing-box умрёт вместе с нами, даже если нас убьют
             p.BeginOutputReadLine();
@@ -47,7 +48,8 @@ namespace ViviTune
         public void Stop()
         {
             if (!Running) return;
-            try { _p.Kill(); _p.WaitForExit(3000); } catch (InvalidOperationException) { } // уже завершился
+            try { _p.Kill(); _p.WaitForExit(3000); }
+            catch (Exception e) when (e is InvalidOperationException || e is System.ComponentModel.Win32Exception) { } // уже завершился или не дали убить
         }
 
         public void Dispose()
@@ -55,8 +57,6 @@ namespace ViviTune
             Stop();
             CloseHandle(_job); // KILL_ON_JOB_CLOSE
         }
-
-        static void Raise(Action<string> h, string s) { if (h != null) h(s); }
 
         static IntPtr CreateJob()
         {

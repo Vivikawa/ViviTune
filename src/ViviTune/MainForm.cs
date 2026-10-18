@@ -41,7 +41,7 @@ namespace ViviTune
 
             _ip.Text = _s.Ip;
             _port.Value = Math.Max(1, Math.Min(65535, _s.Port));
-            foreach (var a in _s.Apps ?? new System.Collections.Generic.List<string>()) _apps.Items.Add(a);
+            foreach (var a in _s.Apps) _apps.Items.Add(a);
 
             _ip.TextChanged += (a, b) => Changed();
             _port.ValueChanged += (a, b) => Changed();
@@ -78,6 +78,8 @@ namespace ViviTune
             {
                 var l = _log.Lines;
                 _log.Lines = l.Skip(l.Length - 500).ToArray();
+                _log.SelectionStart = _log.TextLength; // присвоение Lines сбрасывает прокрутку вверх
+                _log.ScrollToCaret();
             }
         }
 
@@ -104,7 +106,13 @@ namespace ViviTune
 
         void Toggle()
         {
-            if (_runner.Running) { _stopping = true; _runner.Stop(); return; } // событие Exited вернёт интерфейс в исходное состояние
+            if (_runner.Running) // событие Exited вернёт интерфейс в исходное состояние
+            {
+                _stopping = true;
+                _runner.Stop();
+                if (_runner.Running) _stopping = false; // убить не удалось: дальнейший выход считаем неожиданным
+                return;
+            }
             if (!File.Exists(SingBox)) { _status.Text = "Не найден sing-box.exe рядом с программой"; return; }
 
             _busy = true;

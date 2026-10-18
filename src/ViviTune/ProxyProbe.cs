@@ -14,7 +14,9 @@ namespace ViviTune
 
     public static class ProxyProbe
     {
-        public static ProbeResult Probe(string ip, int port, int timeoutMs = 3000)
+        const int timeoutMs = 3000;
+
+        public static ProbeResult Probe(string ip, int port)
         {
             var r = new ProbeResult();
             try
