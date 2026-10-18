@@ -38,7 +38,8 @@ namespace ViviTune.Windows
             p.OutputDataReceived += onLine;
             p.ErrorDataReceived += onLine;
             p.Exited += (s, e) => Exited?.Invoke();
-            if (_p != null) _p.Dispose(); // предыдущий запуск уже завершён (UI не даёт стартовать дважды)
+            // предыдущий запуск уже завершён (UI не даёт стартовать дважды); null — если p.Start() бросит, Running/Stop не тронут освобождённый
+            if (_p != null) { _p.Dispose(); _p = null; }
             p.Start();
             AssignProcessToJobObject(_job, p.Handle); // sing-box умрёт вместе с нами, даже если нас убьют
             p.BeginOutputReadLine();

@@ -8,11 +8,12 @@ public sealed record RunningApp(string Path, string Name);
 
 public static class ProcessCatalog
 {
+    // excludePaths — уже добавленные: исключаются по имени файла (та же программа в другой папке — тоже она).
     public static List<RunningApp> Running(IEnumerable<string> excludePaths)
     {
         var win = Environment.GetFolderPath(Environment.SpecialFolder.Windows).TrimEnd('\\') + "\\";
         var self = Environment.ProcessPath ?? "";
-        var skip = new HashSet<string>(excludePaths, StringComparer.OrdinalIgnoreCase) { self };
+        var skip = new HashSet<string>(excludePaths.Select(System.IO.Path.GetFileName).OfType<string>(), StringComparer.OrdinalIgnoreCase);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var result = new List<RunningApp>();
         foreach (var p in Process.GetProcesses())
@@ -24,7 +25,7 @@ public static class ProcessCatalog
                 if (string.IsNullOrEmpty(path) || !path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
                 if (path.StartsWith(win, StringComparison.OrdinalIgnoreCase)) continue;
                 if (string.Equals(System.IO.Path.GetFileName(path), "sing-box.exe", StringComparison.OrdinalIgnoreCase)) continue;
-                if (skip.Contains(path) || !seen.Add(path)) continue;
+                if (string.Equals(path, self, StringComparison.OrdinalIgnoreCase) || skip.Contains(System.IO.Path.GetFileName(path)) || !seen.Add(path)) continue;
                 result.Add(new RunningApp(path, DisplayName(path)));
             }
             catch { }

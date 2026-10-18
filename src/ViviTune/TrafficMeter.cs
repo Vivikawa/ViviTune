@@ -55,7 +55,8 @@ public static class TrafficMath
 public sealed class TrafficMeter : IDisposable
 {
     readonly int port;
-    readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(1) };
+    // без системного прокси: запросы к 127.0.0.1 не должны уходить в прокси из настроек Windows
+    readonly HttpClient http = new(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(1) };
     CancellationTokenSource? cts;
 
     public event Action<Speed>? Sample;

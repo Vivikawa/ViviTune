@@ -49,6 +49,18 @@ static class Program
         AppListOps.Add(copy, @"C:\b.exe");
         Check(orig.Count == 1 && orig[0].Enabled && copy.Count == 2 && !copy[0].Enabled && !ReferenceEquals(orig[0], copy[0]),
             "AppList: Copy — новый список с новыми элементами (Settings.Apps на месте не меняется)");
+        var upd = new List<AppEntry> { new() { Path = @"C:\Discord\app-1.0.1\Discord.exe", Enabled = false }, new() { Path = @"C:\a\chrome.exe" } };
+        Check(AppListOps.Add(upd, @"C:\Discord\app-1.0.2\DISCORD.EXE") && upd.Count == 2 && upd[0].Path == @"C:\Discord\app-1.0.2\DISCORD.EXE"
+            && !upd[0].Enabled && upd[1].Path == @"C:\a\chrome.exe",
+            "AppList: тот же файл в другой папке (обновление) -> путь заменён на месте, Enabled прежний, второй строки нет");
+        Check(!AppListOps.Add(upd, @"c:\discord\app-1.0.2\discord.exe") && upd.Count == 2 && upd[0].Path == @"C:\Discord\app-1.0.2\DISCORD.EXE",
+            "AppList: тот же файл, путь не изменился -> false");
+        Check(AppListOps.SameFile(@"C:\Discord\app-1.0.1\Discord.exe", @"D:\x\DISCORD.EXE") && !AppListOps.SameFile(@"C:\Discord\Discord.exe", @"C:\Discord\Update.exe"),
+            "AppList.SameFile: по имени файла без учёта регистра, папка не важна");
+
+        var g = new ClickGuard();
+        Check(g.TryAccept(0) && !g.TryAccept(1) && !g.TryAccept(499) && g.TryAccept(500) && !g.TryAccept(999) && g.TryAccept(1000) && g.TryAccept(5000),
+            "ClickGuard: второе нажатие в течение 500 мс после принятого не принимается");
 
         var v = new ViewState();
         var first = v.SyncApps(new List<AppEntry> { new() { Path = @"C:\Apps\Discord.exe" }, new() { Path = @"C:\Apps\chrome.exe", Enabled = false } });
@@ -79,6 +91,9 @@ static class Program
             var after = ProcessCatalog.Running([first.ToUpperInvariant()]);
             Check(!after.Any(a => string.Equals(a.Path, first, StringComparison.OrdinalIgnoreCase)),
                 "Running: excludePaths работает без учёта регистра");
+            var moved = ProcessCatalog.Running([@"C:\другая\папка\" + System.IO.Path.GetFileName(first)]);
+            Check(!moved.Any(a => string.Equals(a.Path, first, StringComparison.OrdinalIgnoreCase)),
+                "Running: уже добавленный по имени файла (другая папка) тоже исключён");
         }
         var png = ProcessCatalog.IconPng(System.IO.Path.Combine(win, "explorer.exe"));
         Check(png != null && png.Length > 4 && png[0] == 0x89 && png[1] == (byte)'P' && png[2] == (byte)'N' && png[3] == (byte)'G',
@@ -407,9 +422,24 @@ static class Program
             m.Start();
             ev.Wait(5000);
         }
+        // системный прокси, который не пропускает 127.0.0.1 мимо себя: счётчик должен ходить напрямую
+        double viaProxyUp = 0;
+        var oldProxy = HttpClient.DefaultProxy;
+        HttpClient.DefaultProxy = new DeadProxy();
+        Interlocked.Exchange(ref n, 0); // снова рост между первым и вторым ответом
+        try
+        {
+            using var m = new TrafficMeter(port, "s");
+            using var ev = new ManualResetEventSlim();
+            m.Sample += s => { if (s.UpBps > viaProxyUp) { viaProxyUp = s.UpBps; ev.Set(); } };
+            m.Start();
+            ev.Wait(5000);
+        }
+        finally { HttpClient.DefaultProxy = oldProxy; }
         cts.Cancel();
         l2.Stop();
         Check(maxUp > 0, "TrafficMeter: фейковый Clash API даёт UpBps > 0");
+        Check(viaProxyUp > 0, "TrafficMeter: системный прокси не используется (127.0.0.1 напрямую)");
         Check(headers.Count > 0 && headers.All(h => h.Contains("Authorization: Bearer s") && h.StartsWith("GET /connections")), "TrafficMeter: заголовок Authorization");
     }
 
@@ -498,11 +528,51 @@ static class Program
                 var fb = new FakeSingBox();
                 var s = new Settings { Ip = "127.0.0.1", Port = 1080, Apps = A(@"C:\a\chrome.exe") };
                 using var ss = new Session(s, fb, NewCfg(), Up, Delay);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
                 ss.ConnectAsync().Wait(2000);
                 s.Apps[0].Enabled = false;
                 ss.AppsChanged();
                 Thread.Sleep(150);
                 Check(ss.State == ConnState.Disconnected && fb.Starts == 1 && ss.Error == null, "Session: выключено последнее приложение");
+                lock (logs) Check(logs.Contains("Отключено: нет включённых приложений"), "Session: выключено последнее приложение -> строка в логе");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Two();
+                s.Apps.Add(new AppEntry { Path = @"C:\c\Discord.exe", Enabled = false });
+                s.Apps.Add(new AppEntry { Path = @"D:\old\CHROME.EXE", Enabled = false });
+                var cfg = NewCfg();
+                using var ss = new Session(s, fb, cfg, Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                s.Apps[3].Enabled = true; // включён тот же chrome.exe по другому пути: правила те же
+                ss.AppsChanged();
+                bool a = ss.State == ConnState.Connected;
+                s.Apps.RemoveAt(2); // убран выключенный Discord
+                ss.AppsChanged();
+                bool b = ss.State == ConnState.Connected;
+                Thread.Sleep(150);
+                Check(a && b && ss.State == ConnState.Connected && fb.Starts == 1 && fb.Stops == 0,
+                    "Session: правила те же (включён дубль, убран выключенный) -> без перезапуска");
+                s.Apps[1].Enabled = false;
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                Check(fb.Starts == 2 && ss.State == ConnState.Connected && CfgApps(cfg).SequenceEqual(new[] { "chrome.exe" }),
+                    "Session: после изменений без перезапуска следующий перезапуск по последнему состоянию");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Two();
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                s.Apps[1].Enabled = false;
+                ss.AppsChanged();
+                bool restarting = ss.State == ConnState.Restarting;
+                s.Apps[1].Enabled = true; // вернули как было, пока ждали перезапуска
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                Check(restarting && ss.State == ConnState.Connected && fb.Starts == 1 && fb.Stops == 0 && ss.Error == null,
+                    "Session: выключили и сразу включили обратно -> без перезапуска");
             }
             {
                 var fb = new FakeSingBox();
@@ -591,12 +661,38 @@ static class Program
                 try { sb.Start(NewCfg()); } catch (FileNotFoundException e) { msg = e.Message; }
                 Check(msg == "Не найден sing-box.exe рядом с программой" && !sb.Running, "Runner: нет sing-box.exe -> FileNotFoundException");
             }
+            {
+                // прошлый запуск был, новый не стартовал (здесь: нет рабочей папки) -> Running false, Stop/Dispose без исключений
+                var rn = new ViviTune.Windows.Runner(Path.Combine(Environment.SystemDirectory, "whoami.exe")); // ругается на аргументы и выходит
+                bool ok;
+                try
+                {
+                    rn.Start(NewCfg());
+                    for (int i = 0; i < 60 && rn.Running; i++) Thread.Sleep(50);
+                    bool threw = false;
+                    try { rn.Start(Path.Combine(root, "нет-папки", "config.json")); }
+                    catch (System.ComponentModel.Win32Exception) { threw = true; }
+                    ok = threw && !rn.Running;
+                    rn.Stop();
+                    rn.Dispose();
+                }
+                catch (Exception) { ok = false; }
+                Check(ok, "Runner: Start не удался после прошлого запуска -> Running == false, Stop/Dispose без исключений");
+            }
         }
         finally
         {
             try { Directory.Delete(root, true); } catch { }
         }
     }
+}
+
+// Системный прокси, который никого не пропускает мимо себя (и 127.0.0.1 тоже) и сам не отвечает.
+sealed class DeadProxy : IWebProxy
+{
+    public ICredentials? Credentials { get; set; }
+    public Uri GetProxy(Uri destination) => new("http://127.0.0.1:9");
+    public bool IsBypassed(Uri host) => false;
 }
 
 sealed class FakeSingBox : ISingBox

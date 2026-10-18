@@ -14,6 +14,7 @@ namespace ViviTune.Ui
         List<AppRow> running = new();
         bool loading;
         int opening; // номер открытия панели: результаты прошлой загрузки не применяются
+        readonly ClickGuard pickGuard = new(), removeGuard = new(); // список сдвигается: второй клик попал бы по соседней строке
 
         public AppsPage()
         {
@@ -73,14 +74,14 @@ namespace ViviTune.Ui
             });
         }
 
-        // Поиск по имени без учёта регистра; уже добавленные не показываются.
+        // Поиск по имени без учёта регистра; уже добавленные (то же имя .exe, хоть и в другой папке) не показываются.
         void Filter()
         {
             var q = (SearchBox.Text ?? "").Trim();
             var apps = State?.Apps;
             shown.Clear();
             foreach (var r in running)
-                if (r.Name.Contains(q, StringComparison.OrdinalIgnoreCase) && apps?.Any(a => AppListOps.Same(a.Path, r.Path)) != true)
+                if (r.Name.Contains(q, StringComparison.OrdinalIgnoreCase) && apps?.Any(a => AppListOps.SameFile(a.Path, r.Path)) != true)
                     shown.Add(r);
             RunningHint.Text = loading ? "Загрузка…"
                 : shown.Count > 0 ? ""
@@ -91,7 +92,7 @@ namespace ViviTune.Ui
 
         void OnPickRunning(object? sender, RoutedEventArgs e)
         {
-            if (sender is not Control { DataContext: AppRow r } || State is not { } s) return;
+            if (sender is not Control { DataContext: AppRow r } || State is not { } s || !pickGuard.TryAccept(Environment.TickCount64)) return;
             s.RequestAddApp(r.Path);
             Filter(); // добавленное уходит из «Запущены сейчас»; панель остаётся открытой для следующих
         }
@@ -103,7 +104,7 @@ namespace ViviTune.Ui
 
         void OnRemove(object? sender, RoutedEventArgs e)
         {
-            if (sender is Control { DataContext: AppRow r }) State?.RequestRemoveApp(r.Path);
+            if (sender is Control { DataContext: AppRow r } && removeGuard.TryAccept(Environment.TickCount64)) State?.RequestRemoveApp(r.Path);
         }
 
         async void PickFile()

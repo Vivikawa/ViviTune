@@ -27,6 +27,7 @@ public sealed class Session : IDisposable
     const string CrashMsg = "sing-box завершился, прокси не работает";
     const string ReopenMsg = "Перезапустите выбранные приложения: уже открытые соединения остаются прямыми.";
     const string NoUdpMsg = "ВНИМАНИЕ: UDP через этот прокси не работает: игры и голосовая связь могут не заработать.";
+    const string NoAppsMsg = "Отключено: нет включённых приложений";
 
     readonly Settings settings;
     readonly ISingBox sb;
@@ -43,6 +44,7 @@ public sealed class Session : IDisposable
     bool? udpOk;
     DateTime? since;
     Settings? latest;   // последний снимок настроек
+    Settings? applied;  // снимок, с которым запущен текущий sing-box
     TrafficMeter? meter;
     int attempt;        // меняется при Connect/Disconnect: устаревшая проверка прокси ничего не запускает
     int ticket;         // номер последнего AppsChanged: перезапуск делает только он
@@ -88,7 +90,9 @@ public sealed class Session : IDisposable
         return a == 0 ? Task.CompletedTask : Task.Run(() => Connect(a));
     }
 
-    public void Disconnect()
+    public void Disconnect() => Disconnect(null);
+
+    void Disconnect(string? log)
     {
         TrafficMeter? m;
         lock (gate)
@@ -99,7 +103,7 @@ public sealed class Session : IDisposable
         }
         m?.Dispose();
         lock (ops) sb.Stop();
-        Raise(true);
+        Raise(true, log);
     }
 
     public void AppsChanged()
@@ -113,6 +117,8 @@ public sealed class Session : IDisposable
             if (!none)
             {
                 latest = snap; // при Checking его подхватит Connect
+                // правила те же, что у запущенного sing-box (убран/переключён выключенный, дубль имени): соединения не рвём
+                if (state == ConnState.Connected && SameNames(snap, applied!)) return;
                 if (state != ConnState.Checking)
                 {
                     t = ++ticket;
@@ -121,7 +127,7 @@ public sealed class Session : IDisposable
                 }
             }
         }
-        if (none) { Disconnect(); return; } // правило без приложений матчило бы весь трафик
+        if (none) { Disconnect(NoAppsMsg); return; } // правило без приложений матчило бы весь трафик
         if (entered) Raise(true);
         if (schedule) ScheduleRestart(t);
     }
@@ -176,6 +182,7 @@ public sealed class Session : IDisposable
                     else if (keep)
                     {
                         meter = m;
+                        applied = used;
                         udpOk = r.UdpSupported;
                         since = DateTime.Now;
                         restart = !ReferenceEquals(used, latest); // список изменили, пока запускались
@@ -198,6 +205,7 @@ public sealed class Session : IDisposable
 
     void Restart(int t)
     {
+        if (KeepRunning(t)) return;
         string? fail = null;
         bool connected = false;
         lock (ops)
@@ -225,6 +233,7 @@ public sealed class Session : IDisposable
                 else if (keep)
                 {
                     meter = m;
+                    applied = snap;
                     if (t == ticket) { state = ConnState.Connected; epoch++; connected = true; } // иначе впереди ещё перезапуск
                 }
             }
@@ -234,6 +243,26 @@ public sealed class Session : IDisposable
         Raise(false, RestartMsg, fail);
         if (connected) OnExited();
     }
+
+    // Набор вернули к тому, с которым sing-box уже запущен (выключили и включили обратно): не перезапускаем,
+    // соединения не рвутся. Под ops: перезапуск, который ещё идёт, сначала закончится и обновит applied.
+    bool KeepRunning(int t)
+    {
+        lock (ops)
+            lock (gate)
+            {
+                if (t != ticket || state != ConnState.Restarting || !SameNames(latest!, applied!)) return false;
+                state = ConnState.Connected;
+                epoch++;
+            }
+        Raise(false);
+        OnExited(); // sing-box мог упасть, пока мы были в Restarting
+        return true;
+    }
+
+    // Те же имена .exe (без учёта регистра и порядка) — тот же конфиг для правил sing-box.
+    static bool SameNames(Settings a, Settings b) =>
+        a.ProcessNames().ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(b.ProcessNames());
 
     TrafficMeter StartSingBox(Settings snap)
     {
