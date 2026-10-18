@@ -18,7 +18,7 @@ namespace ViviTune
             return d;
         }
 
-        public static string Build(Settings s)
+        public static string Build(Settings s, int apiPort, string apiSecret)
         {
             var err = s.Validate();
             if (err != null) throw new InvalidOperationException(err);
@@ -29,6 +29,7 @@ namespace ViviTune
 
             var config = D(
                 "log", D("level", "warn", "timestamp", true),
+                "experimental", D("clash_api", D("external_controller", "127.0.0.1:" + apiPort, "secret", apiSecret)),
                 "dns", D(
                     "servers", new object[]
                     {

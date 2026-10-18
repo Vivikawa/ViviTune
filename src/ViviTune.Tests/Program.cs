@@ -75,7 +75,7 @@ static class Program
         Check(mix.Validate() == "Добавьте хотя бы одно приложение", "Validate: все выключены");
     }
 
-    static JsonObject Cfg(Settings s) => JsonNode.Parse(ConfigBuilder.Build(s))!.AsObject();
+    static JsonObject Cfg(Settings s) => JsonNode.Parse(ConfigBuilder.Build(s, 9090, "t"))!.AsObject();
 
     static JsonObject Obj(JsonNode? o) => o!.AsObject();
 
@@ -127,8 +127,11 @@ static class Program
         var v6rules = Arr(Obj(v6["route"])["rules"]);
         Check(Str(Arr(Obj(v6rules[IndexOfRule(v6rules, "ip_cidr")])["ip_cidr"])[0]) == "::1/128", "IPv6-прокси исключается как /128");
 
+        var ca = Obj(Obj(JsonNode.Parse(ConfigBuilder.Build(s, 51234, "abc"))!["experimental"])["clash_api"]);
+        Check(Str(ca["external_controller"]) == "127.0.0.1:51234" && Str(ca["secret"]) == "abc", "clash_api с переданными портом и секретом");
+
         bool threw = false;
-        try { ConfigBuilder.Build(new Settings()); } catch (InvalidOperationException) { threw = true; }
+        try { ConfigBuilder.Build(new Settings(), 9090, "t"); } catch (InvalidOperationException) { threw = true; }
         Check(threw, "Build: пустой список приложений -> исключение (иначе правило без условий матчит всё)");
     }
 
