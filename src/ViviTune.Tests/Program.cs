@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json.Nodes;
 using ViviTune;
+using ViviTune.Windows;
 
 static class Program
 {
@@ -20,7 +21,35 @@ static class Program
         ProbeTests();
         TrafficTests();
         SessionTests();
+        CatalogTests();
         return failures == 0 ? 0 : 1;
+    }
+
+    static void CatalogTests()
+    {
+        var win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        var list = ProcessCatalog.Running([]);
+        Check(list.All(a => !a.Path.StartsWith(win, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(System.IO.Path.GetFileName(a.Path), "sing-box.exe", StringComparison.OrdinalIgnoreCase)),
+            "Running: нет файлов из WINDIR и sing-box");
+        Check(!list.Any(a => string.Equals(a.Path, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase)),
+            "Running: текущий процесс исключён");
+        if (list.Count == 0) Console.WriteLine("skip: Running: excludePaths (список пуст)");
+        else
+        {
+            var first = list[0].Path;
+            var after = ProcessCatalog.Running([first.ToUpperInvariant()]);
+            Check(!after.Any(a => string.Equals(a.Path, first, StringComparison.OrdinalIgnoreCase)),
+                "Running: excludePaths работает без учёта регистра");
+        }
+        var png = ProcessCatalog.IconPng(System.IO.Path.Combine(win, "explorer.exe"));
+        Check(png != null && png.Length > 4 && png[0] == 0x89 && png[1] == (byte)'P' && png[2] == (byte)'N' && png[3] == (byte)'G',
+            "IconPng: explorer.exe -> PNG");
+        Check(ProcessCatalog.IconPng(@"C:\нет\такого.exe") == null, "IconPng: нет файла -> null");
+        var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "x.exe");
+        File.WriteAllBytes(tmp, []);
+        Check(ProcessCatalog.DisplayName(tmp) == "x", "DisplayName: без описания");
+        File.Delete(tmp);
     }
 
     static List<AppEntry> A(params string[] paths) => paths.Select(x => new AppEntry { Path = x }).ToList();
