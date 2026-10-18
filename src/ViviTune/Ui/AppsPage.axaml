@@ -1,0 +1,6 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ViviTune.Ui.AppsPage">
+  <!-- Заглушка: страницу делает Task 9 -->
+  <TextBlock Classes="title" Text="Приложения через прокси" Margin="24,18" />
+</UserControl>

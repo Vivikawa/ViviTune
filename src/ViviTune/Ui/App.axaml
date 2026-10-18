@@ -3,6 +3,11 @@
              x:Class="ViviTune.Ui.App"
              RequestedThemeVariant="Dark">
   <Application.Styles>
-    <FluentTheme />
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Dark" Accent="#22d3ee" RegionColor="#0e1120" ErrorText="#f87171" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+    <StyleInclude Source="avares://ViviTune/Ui/Theme.axaml" />
   </Application.Styles>
 </Application>

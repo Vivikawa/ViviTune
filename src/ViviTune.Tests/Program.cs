@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json.Nodes;
 using ViviTune;
+using ViviTune.Ui;
 using ViviTune.Windows;
 
 static class Program
@@ -22,6 +23,7 @@ static class Program
         TrafficTests();
         SessionTests();
         CatalogTests();
+        ViewStateTests();
         return failures == 0 ? 0 : 1;
     }
 
@@ -104,6 +106,24 @@ static class Program
         Check(mn.Count == 1 && mn[0] == "chrome.exe", "ProcessNames: только включённые");
         mix.Apps[0].Enabled = false;
         Check(mix.Validate() == "Добавьте хотя бы одно приложение", "Validate: все выключены");
+        Check(Settings.ValidateProxy("192.168.1.1", 1818) == null && Settings.ValidateProxy("abc", 1818) == "Некорректный IP"
+            && Settings.ValidateProxy("10.0.0.1", 0) == "Порт должен быть от 1 до 65535", "ValidateProxy: только IP и порт");
+    }
+
+    static void ViewStateTests()
+    {
+        var v = new ViewState();
+        for (int i = 0; i < 70; i++) v.PushSpeed(new Speed(i, i * 2));
+        Check(v.UpHistory.Count == 60 && v.DownHistory.Count == 60 && v.UpHistory[0] == 10 && v.UpHistory[59] == 69
+            && v.UpBps == 69 && v.DownBps == 138, "ViewState: лимиты (60 значений скорости)");
+        for (int i = 0; i < 600; i++) v.AddLog("line " + i);
+        Check(v.LogLines.Count == 500 && v.LogLines[0] == "line 100" && v.LogLines[499] == "line 599",
+            "ViewState: лимиты (500 последних строк лога)");
+        v.Ip = "10.0.0.1";
+        v.Port = 1080;
+        v.State = ConnState.Connected;
+        Check(v.ProxyLabel == "SOCKS5 · 10.0.0.1:1080" && !v.SettingsEditable && v.StatusText == "Подключено",
+            "ViewState: ProxyLabel, SettingsEditable, StatusText");
     }
 
     static JsonObject Cfg(Settings s) => JsonNode.Parse(ConfigBuilder.Build(s, 9090, "t"))!.AsObject();

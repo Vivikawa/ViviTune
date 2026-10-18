@@ -1,0 +1,25 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="using:ViviTune.Ui"
+             xmlns:sys="using:System"
+             x:Class="ViviTune.Ui.LogPage"
+             x:DataType="ui:ViewState">
+  <Grid RowDefinitions="Auto,*" Margin="24,18,24,24">
+    <TextBlock Classes="title" Text="Лог" />
+    <Border Grid.Row="1" Classes="card" Margin="0,14,0,0" Padding="0">
+      <Panel>
+        <ScrollViewer Name="Scroll" Padding="16,12" HorizontalScrollBarVisibility="Disabled">
+          <ItemsControl ItemsSource="{Binding LogLines}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="sys:String">
+                <SelectableTextBlock Text="{Binding}" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                     LineHeight="18" TextWrapping="Wrap" Foreground="#c5c9e4" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+        <TextBlock Classes="muted" Text="Пока пусто" Margin="16,12" IsVisible="{Binding !LogLines.Count}" />
+      </Panel>
+    </Border>
+  </Grid>
+</UserControl>

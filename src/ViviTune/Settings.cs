@@ -65,9 +65,14 @@ namespace ViviTune
         // null, если всё корректно; иначе текст ошибки для пользователя
         public string? Validate()
         {
-            if (!IPAddress.TryParse(Ip, out _)) return "Некорректный IP";
-            if (Port < 1 || Port > 65535) return "Порт должен быть от 1 до 65535";
-            if (ProcessNames().Count == 0) return "Добавьте хотя бы одно приложение";
+            return ValidateProxy(Ip, Port) ?? (ProcessNames().Count == 0 ? "Добавьте хотя бы одно приложение" : null);
+        }
+
+        // Только адрес прокси (для страницы настроек): null, если IP и порт корректны.
+        public static string? ValidateProxy(string ip, int port)
+        {
+            if (!IPAddress.TryParse(ip, out _)) return "Некорректный IP";
+            if (port < 1 || port > 65535) return "Порт должен быть от 1 до 65535";
             return null;
         }
 

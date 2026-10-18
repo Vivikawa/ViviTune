@@ -1,9 +1,37 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="using:ViviTune.Ui"
         x:Class="ViviTune.Ui.MainWindow"
+        x:DataType="ui:ViewState"
         Title="ViviTune"
         Width="900" Height="640"
         MinWidth="760" MinHeight="520"
-        Background="#0e1120"
+        Background="{StaticResource BgBrush}"
+        Foreground="{StaticResource TextBrush}"
         FontFamily="fonts:Inter#Inter">
+  <Grid ColumnDefinitions="54,*">
+    <Border Background="{StaticResource MenuBrush}">
+      <StackPanel Spacing="8" Margin="0,14" HorizontalAlignment="Center">
+        <RadioButton Name="NavHome" Theme="{StaticResource NavItem}" GroupName="nav" IsChecked="True" ToolTip.Tip="Главная">
+          <PathIcon Width="20" Height="20" Data="M12 3 2 12h3v8h5v-6h4v6h5v-8h3z" />
+        </RadioButton>
+        <RadioButton Name="NavApps" Theme="{StaticResource NavItem}" GroupName="nav" ToolTip.Tip="Приложения">
+          <PathIcon Width="18" Height="18" Data="M3 3h8v8H3z M13 3h8v8h-8z M3 13h8v8H3z M13 13h8v8h-8z" />
+        </RadioButton>
+        <RadioButton Name="NavLog" Theme="{StaticResource NavItem}" GroupName="nav" ToolTip.Tip="Лог">
+          <PathIcon Width="18" Height="18" Data="M3 5h18v2.5H3z M3 10.75h18v2.5H3z M3 16.5h12v2.5H3z" />
+        </RadioButton>
+        <RadioButton Name="NavSettings" Theme="{StaticResource NavItem}" GroupName="nav" ToolTip.Tip="Настройки">
+          <PathIcon Width="20" Height="20"
+                    Data="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94L14.4 2.81c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41L9.25 5.35c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
+        </RadioButton>
+      </StackPanel>
+    </Border>
+    <Panel Grid.Column="1">
+      <ui:HomePage IsVisible="{Binding #NavHome.IsChecked}" />
+      <ui:AppsPage IsVisible="{Binding #NavApps.IsChecked}" />
+      <ui:LogPage IsVisible="{Binding #NavLog.IsChecked}" />
+      <ui:SettingsPage IsVisible="{Binding #NavSettings.IsChecked}" />
+    </Panel>
+  </Grid>
 </Window>
