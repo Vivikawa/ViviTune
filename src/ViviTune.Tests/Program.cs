@@ -19,6 +19,7 @@ static class Program
         ConfigTests();
         ProbeTests();
         TrafficTests();
+        SessionTests();
         return failures == 0 ? 0 : 1;
     }
 
@@ -273,4 +274,226 @@ static class Program
         Check(maxUp > 0, "TrafficMeter: фейковый Clash API даёт UpBps > 0");
         Check(headers.Count > 0 && headers.All(h => h.Contains("Authorization: Bearer s") && h.StartsWith("GET /connections")), "TrafficMeter: заголовок Authorization");
     }
+
+    static readonly TimeSpan Delay = TimeSpan.FromMilliseconds(50);
+    const string Crashed = "sing-box завершился, прокси не работает";
+
+    static Settings Two() => new Settings { Ip = "127.0.0.1", Port = 1080, Apps = A(@"C:\a\chrome.exe", @"C:\b\Game.exe") };
+
+    static ProbeResult Up(string ip, int port) => new ProbeResult { Reachable = true, UdpSupported = true };
+
+    static List<string> CfgApps(string path)
+    {
+        var rules = Arr(Obj(JsonNode.Parse(File.ReadAllText(path))!["route"])["rules"]);
+        return Arr(Obj(rules[IndexOfRule(rules, "process_name")])["process_name"]).Select(x => Str(x)!).ToList();
+    }
+
+    static void SessionTests()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "vivitune-tests-" + Guid.NewGuid().ToString("N"));
+        int n = 0;
+        string NewCfg() { var d = Path.Combine(root, (++n).ToString()); Directory.CreateDirectory(d); return Path.Combine(d, "config.json"); }
+        try
+        {
+            {
+                var fb = new FakeSingBox();
+                var cfg = NewCfg();
+                var speeds = new List<Speed>();
+                using var ss = new Session(Two(), fb, cfg, Up, Delay);
+                ss.Speed += sp => { lock (speeds) speeds.Add(sp); };
+                bool done = ss.ConnectAsync().Wait(2000);
+                Check(done && ss.State == ConnState.Connected && fb.Starts == 1 && ss.UdpOk == true && File.Exists(cfg) &&
+                      ss.Error == null && ss.ConnectedSince != null, "Session: успешное подключение");
+                var ca = Obj(Obj(JsonNode.Parse(File.ReadAllText(cfg))!["experimental"])["clash_api"]);
+                var secret = Str(ca["secret"]) ?? "";
+                Check(secret.Length == 32 && secret.All(Uri.IsHexDigit) && Str(ca["external_controller"])!.StartsWith("127.0.0.1:"),
+                    "Session: Clash API на 127.0.0.1, секрет 16 байт hex");
+                ss.Disconnect();
+                Speed last;
+                lock (speeds) last = speeds.Count > 0 ? speeds[^1] : new Speed(-1, -1);
+                Check(ss.State == ConnState.Disconnected && ss.ConnectedSince == null && last == new Speed(0, 0),
+                    "Session: после Disconnect скорость 0");
+            }
+            {
+                var fb = new FakeSingBox();
+                using var ss = new Session(Two(), fb, NewCfg(), (_, _) => new ProbeResult { Error = "таймаут подключения" }, Delay);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Disconnected && ss.Error != null && ss.Error.StartsWith("Прокси недоступен") && fb.Starts == 0,
+                    "Session: прокси недоступен");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Two();
+                foreach (var a in s.Apps) a.Enabled = false;
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Disconnected && ss.Error == "Добавьте хотя бы одно приложение" && fb.Starts == 0,
+                    "Session: нет включённых приложений");
+            }
+            {
+                var fb = new FakeSingBox { StartError = new FileNotFoundException("Не найден sing-box.exe рядом с программой") };
+                using var ss = new Session(Two(), fb, NewCfg(), Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Disconnected && ss.Error == "Не удалось запустить: Не найден sing-box.exe рядом с программой",
+                    "Session: ошибка запуска sing-box");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Two();
+                var cfg = NewCfg();
+                using var ss = new Session(s, fb, cfg, Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                s.Apps[1].Enabled = false;
+                ss.AppsChanged();
+                bool restarting = ss.State == ConnState.Restarting;
+                s.Apps[1].Enabled = true;
+                ss.AppsChanged();
+                s.Apps.Add(new AppEntry { Path = @"C:\c\Discord.exe" });
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                var apps = CfgApps(cfg);
+                Check(restarting && fb.Starts == 2 && fb.Stops == 1 && ss.State == ConnState.Connected,
+                    "Session: три быстрых изменения -> один перезапуск");
+                Check(apps.SequenceEqual(new[] { "chrome.exe", "Game.exe", "Discord.exe" }), "Session: конфиг перезапуска по последнему состоянию");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = new Settings { Ip = "127.0.0.1", Port = 1080, Apps = A(@"C:\a\chrome.exe") };
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                s.Apps[0].Enabled = false;
+                ss.AppsChanged();
+                Thread.Sleep(150);
+                Check(ss.State == ConnState.Disconnected && fb.Starts == 1 && ss.Error == null, "Session: выключено последнее приложение");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Two();
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                s.Apps[0].Enabled = false;
+                ss.AppsChanged();
+                bool stillUp = ss.State == ConnState.Restarting;
+                s.Apps[1].Enabled = false;
+                ss.AppsChanged();
+                bool off = ss.State == ConnState.Disconnected;
+                Thread.Sleep(150);
+                Check(stillUp && off && ss.State == ConnState.Disconnected && fb.Starts == 1 && ss.Error == null,
+                    "Session: выключено последнее приложение во время ожидания перезапуска");
+            }
+            {
+                var fb = new FakeSingBox { ExitOnStop = true };
+                var s = Two();
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                s.Apps[0].Enabled = false;
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                bool afterRestart = ss.State == ConnState.Connected && ss.Error == null && fb.Starts == 2;
+                ss.Disconnect();
+                Check(afterRestart && ss.State == ConnState.Disconnected && ss.Error == null,
+                    "Session: Exited при перезапуске и Disconnect не ошибка");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Two();
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                fb.LateExited(); // событие от прежнего процесса: текущий жив
+                bool a = ss.State == ConnState.Connected && ss.Error == null;
+                s.Apps[0].Enabled = false;
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                fb.LateExited();
+                bool b = ss.State == ConnState.Connected && ss.Error == null;
+                ss.Disconnect();
+                fb.LateExited();
+                Check(a && b && ss.State == ConnState.Disconnected && ss.Error == null, "Session: запоздалый Exited от прежнего процесса не ошибка");
+            }
+            {
+                var fb = new FakeSingBox();
+                using var ss = new Session(Two(), fb, NewCfg(), Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                bool up = ss.State == ConnState.Connected;
+                fb.Crash();
+                Check(up && ss.State == ConnState.Disconnected && ss.Error == Crashed && ss.ConnectedSince == null,
+                    "Session: неожиданный выход");
+            }
+            {
+                var fb = new FakeSingBox();
+                using var release = new ManualResetEventSlim();
+                using var ss = new Session(Two(), fb, NewCfg(), (ip, port) => { release.Wait(2000); return Up(ip, port); }, Delay);
+                var t = ss.ConnectAsync();
+                bool checking = ss.State == ConnState.Checking;
+                ss.Disconnect();
+                release.Set();
+                t.Wait(2000);
+                Check(checking && ss.State == ConnState.Disconnected && fb.Starts == 0 && ss.Error == null,
+                    "Session: Disconnect во время проверки отменяет запуск");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Two();
+                var cfg = NewCfg();
+                using var release = new ManualResetEventSlim();
+                using var ss = new Session(s, fb, cfg, (ip, port) => { release.Wait(2000); return Up(ip, port); }, Delay);
+                var t = ss.ConnectAsync();
+                s.Apps.Add(new AppEntry { Path = @"C:\c\Discord.exe" });
+                ss.AppsChanged();
+                release.Set();
+                t.Wait(2000);
+                Thread.Sleep(150);
+                Check(ss.State == ConnState.Connected && fb.Starts == 1 && CfgApps(cfg).Contains("Discord.exe"),
+                    "Session: изменение списка во время проверки попадает в конфиг");
+            }
+            using (var rn = new ViviTune.Windows.Runner(Path.Combine(root, "нет", "sing-box.exe")))
+            {
+                ISingBox sb = rn;
+                string? msg = null;
+                try { sb.Start(NewCfg()); } catch (FileNotFoundException e) { msg = e.Message; }
+                Check(msg == "Не найден sing-box.exe рядом с программой" && !sb.Running, "Runner: нет sing-box.exe -> FileNotFoundException");
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+}
+
+sealed class FakeSingBox : ISingBox
+{
+    volatile bool running;
+    public int Starts, Stops;
+    public bool ExitOnStop;
+    public Exception? StartError;
+
+    public event Action<string>? Line;
+    public event Action? Exited;
+
+    public bool Running => running;
+
+    public void Start(string configPath)
+    {
+        if (StartError != null) throw StartError;
+        Interlocked.Increment(ref Starts);
+        running = true;
+        Line?.Invoke("fake start " + configPath);
+    }
+
+    public void Stop()
+    {
+        Interlocked.Increment(ref Stops);
+        bool was = running;
+        running = false;
+        if (ExitOnStop && was) Exited?.Invoke(); // как настоящий процесс: Exited прямо внутри Stop
+    }
+
+    public void Crash()
+    {
+        running = false;
+        Exited?.Invoke();
+    }
+
+    public void LateExited() => Exited?.Invoke(); // Exited прежнего процесса пришёл, когда новый уже работает
 }

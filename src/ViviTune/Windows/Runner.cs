@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace ViviTune.Windows
 {
-    public class Runner : IDisposable
+    public class Runner : ISingBox, IDisposable
     {
         readonly string _exe;
         readonly IntPtr _job;
@@ -24,6 +24,7 @@ namespace ViviTune.Windows
 
         public void Start(string configPath)
         {
+            if (!File.Exists(_exe)) throw new FileNotFoundException("Не найден sing-box.exe рядом с программой", _exe);
             var psi = new ProcessStartInfo(_exe, "run -c \"" + configPath + "\"")
             {
                 UseShellExecute = false,
