@@ -21,12 +21,14 @@ static class Program
         return failures == 0 ? 0 : 1;
     }
 
+    static List<AppEntry> A(params string[] paths) => paths.Select(x => new AppEntry { Path = x }).ToList();
+
     static void SettingsTests()
     {
         var s = new Settings
         {
             Ip = "192.168.1.1", Port = 1818,
-            Apps = new List<string> { @"C:\Program Files\Chrome\chrome.exe", @"D:\x\CHROME.EXE", @"C:\Игра\Game.exe", @"C:\bin\sing-box.exe" }
+            Apps = A(@"C:\Program Files\Chrome\chrome.exe", @"D:\x\CHROME.EXE", @"C:\Игра\Game.exe", @"C:\bin\sing-box.exe")
         };
         var names = s.ProcessNames();
         Check(names.Count == 2 && names[0] == "chrome.exe" && names[1] == "Game.exe",
@@ -45,6 +47,32 @@ static class Program
         Check(back.Ip == s.Ip && back.Port == 1818 && back.Apps.Count == 4, "Save/Load: туда и обратно");
         File.Delete(p);
         Check(Settings.Load(p).Ip == "192.168.1.1", "Load: нет файла, значения по умолчанию");
+
+        File.WriteAllText(p, """{"Ip":"10.0.0.1","Port":1080,"Apps":["C:\\a\\Discord.exe","D:\\b\\chrome.exe"]}""");
+        var v1 = Settings.Load(p);
+        Check(v1.Ip == "10.0.0.1" && v1.Port == 1080 && v1.Apps.Count == 2 && v1.Apps[0].Path == @"C:\a\Discord.exe" && v1.Apps.All(a => a.Enabled),
+            "Load: формат v1");
+
+        var v2 = new Settings { Apps = A(@"C:\Игра\a.exe", @"C:\b.exe") };
+        v2.Apps[1].Enabled = false;
+        v2.Save(p);
+        var v2b = Settings.Load(p);
+        Check(v2b.Apps.Count == 2 && v2b.Apps[0].Path == @"C:\Игра\a.exe" && v2b.Apps[0].Enabled && !v2b.Apps[1].Enabled,
+            "Save/Load v2: туда и обратно");
+
+        File.WriteAllText(p, """{"Ip":"10.0.0.2","Port":99,"Apps":[42,"C:\\x.exe"]}""");
+        var odd = Settings.Load(p);
+        Check(odd.Ip == "10.0.0.2" && odd.Port == 99 && odd.Apps.Count == 1, "Load: элемент Apps неизвестного вида пропущен");
+        File.WriteAllText(p, """{"Apps":null}""");
+        Check(Settings.Load(p).Apps.Count == 0, "Load: Apps = null -> пустой список");
+        File.Delete(p);
+
+        var mix = new Settings { Apps = A(@"C:\chrome.exe", @"C:\Game.exe") };
+        mix.Apps[1].Enabled = false;
+        var mn = mix.ProcessNames();
+        Check(mn.Count == 1 && mn[0] == "chrome.exe", "ProcessNames: только включённые");
+        mix.Apps[0].Enabled = false;
+        Check(mix.Validate() == "Добавьте хотя бы одно приложение", "Validate: все выключены");
     }
 
     static JsonObject Cfg(Settings s) => JsonNode.Parse(ConfigBuilder.Build(s))!.AsObject();
@@ -64,7 +92,7 @@ static class Program
 
     static void ConfigTests()
     {
-        var s = new Settings { Ip = "192.168.1.1", Port = 1818, Apps = new List<string> { @"C:\a b\chrome.exe", @"C:\Игра\Игра.exe" } };
+        var s = new Settings { Ip = "192.168.1.1", Port = 1818, Apps = A(@"C:\a b\chrome.exe", @"C:\Игра\Игра.exe") };
         var c = Cfg(s);
         var route = Obj(c["route"]);
         var rules = Arr(route["rules"]);
