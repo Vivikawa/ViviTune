@@ -1,0 +1,163 @@
+{
+  "version": 1,
+  "meta": {
+    "lastScanned": "2026-10-18T12:45:17.899Z",
+    "fileCount": 16,
+    "hits": 0,
+    "misses": 0,
+    "renderedHash": "2012b8105c4f90c7d7f14715c8e9c9d0ed8cdbfdeb430a17dbb991c00f12790c",
+    "storeUpdatedAt": "2026-10-18T12:45:17.908Z",
+    "rootHash": "903d5ea215d9088b"
+  },
+  "files": {
+    "AGENTS.md": {
+      "description": "OpenWolf",
+      "tokens": 75,
+      "hash": "e401f79554a8d796",
+      "size": 297,
+      "mtimeMs": 1791134736999.4585,
+      "updatedAt": "2026-10-04T17:25:37.118Z",
+      "source": "scan"
+    },
+    "CLAUDE.md": {
+      "description": "OpenWolf",
+      "tokens": 99,
+      "hash": "074d6b42b583729a",
+      "size": 395,
+      "mtimeMs": 1791134736857.9485,
+      "updatedAt": "2026-10-04T17:25:37.118Z",
+      "source": "scan"
+    },
+    "docs/superpowers/specs/2026-10-04-vivitune-design.md": {
+      "description": "ViviTune — дизайн",
+      "tokens": 1082,
+      "hash": "c1adb30c0c9c4878",
+      "size": 6566,
+      "mtimeMs": 1791135032517.7524,
+      "updatedAt": "2026-10-04T17:30:32.754Z",
+      "source": "hook"
+    },
+    "docs/superpowers/plans/2026-10-04-vivitune.md": {
+      "description": "ViviTune Implementation Plan",
+      "tokens": 8590,
+      "hash": "9e90b19f4d67c8d4",
+      "size": 38796,
+      "mtimeMs": 1791135206886.6619,
+      "updatedAt": "2026-10-04T17:33:27.117Z",
+      "source": "hook"
+    },
+    "src/ViviTune.Tests/ViviTune.Tests.csproj": {
+      "description": "",
+      "tokens": 132,
+      "hash": "3d270aa6444d3411",
+      "size": 495,
+      "mtimeMs": 1791135689848.39,
+      "updatedAt": "2026-10-04T17:41:30.026Z",
+      "source": "hook"
+    },
+    "src/ViviTune.Tests/Program.cs": {
+      "description": "Class: Program",
+      "tokens": 1678,
+      "hash": "8498ade777f84883",
+      "size": 6788,
+      "mtimeMs": 1791135718682.2517,
+      "updatedAt": "2026-10-04T17:41:58.827Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Settings.cs": {
+      "description": "Class: Settings",
+      "tokens": 560,
+      "hash": "25375dd6877f5eb8",
+      "size": 2316,
+      "mtimeMs": 1792327517631.386,
+      "updatedAt": "2026-10-18T12:45:17.898Z",
+      "source": "hook"
+    },
+    "src/ViviTune/ViviTune.csproj": {
+      "description": "",
+      "tokens": 166,
+      "hash": "3876adace9b336ed",
+      "size": 620,
+      "mtimeMs": 1791135441473.3948,
+      "updatedAt": "2026-10-04T17:37:21.644Z",
+      "source": "hook"
+    },
+    ".superpowers/sdd/2026-10-04-vivitune/task-1-report.md": {
+      "description": "Task 1 Report: Каркас, тестовый проект и Settings",
+      "tokens": 1208,
+      "hash": "fd21fdd27573f7f9",
+      "size": 5126,
+      "mtimeMs": 1791135491686.0535,
+      "updatedAt": "2026-10-04T17:38:11.853Z",
+      "source": "hook"
+    },
+    "src/ViviTune/ConfigBuilder.cs": {
+      "description": "Class: ConfigBuilder",
+      "tokens": 628,
+      "hash": "1bb007f6f380ae3e",
+      "size": 2352,
+      "mtimeMs": 1791135589845.4956,
+      "updatedAt": "2026-10-04T17:39:50.013Z",
+      "source": "hook"
+    },
+    ".superpowers/sdd/2026-10-04-vivitune/task-2-report.md": {
+      "description": "Task 2: ConfigBuilder - Implementation Report",
+      "tokens": 998,
+      "hash": "71f0b011c170fd8d",
+      "size": 4395,
+      "mtimeMs": 1791135623430.301,
+      "updatedAt": "2026-10-04T17:40:23.577Z",
+      "source": "hook"
+    },
+    "src/ViviTune/ProxyProbe.cs": {
+      "description": "Class: ProbeResult",
+      "tokens": 536,
+      "hash": "c5c5a31dab91bf81",
+      "size": 2128,
+      "mtimeMs": 1792327511115.416,
+      "updatedAt": "2026-10-18T12:45:11.357Z",
+      "source": "hook"
+    },
+    ".superpowers/sdd/2026-10-04-vivitune/task-3-report.md": {
+      "description": "Task 3: ProxyProbe - Implementation Report",
+      "tokens": 1224,
+      "hash": "d2913c0140ec7927",
+      "size": 4974,
+      "mtimeMs": 1791135777254.5432,
+      "updatedAt": "2026-10-04T17:42:57.417Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Runner.cs": {
+      "description": "Class: Runner",
+      "tokens": 1170,
+      "hash": "add253f6e92390bb",
+      "size": 4493,
+      "mtimeMs": 1792327509365.348,
+      "updatedAt": "2026-10-18T12:45:09.514Z",
+      "source": "hook"
+    },
+    ".superpowers/sdd/2026-10-04-vivitune/task-4-report.md": {
+      "description": "Task 4: Runner — Build Report",
+      "tokens": 1054,
+      "hash": "002f27681bc25e88",
+      "size": 4367,
+      "mtimeMs": 1791135890822.034,
+      "updatedAt": "2026-10-04T17:44:50.972Z",
+      "source": "hook"
+    },
+    "src/ViviTune/MainForm.cs": {
+      "description": "Class: MainForm",
+      "tokens": 1832,
+      "hash": "ae02697cce78fc2a",
+      "size": 7474,
+      "mtimeMs": 1792327512841.0176,
+      "updatedAt": "2026-10-18T12:45:12.982Z",
+      "source": "hook"
+    }
+  },
+  "preamble": [
+    "> Project structure index. Auto-maintained by OpenWolf hooks and daemon.",
+    "> Run `openwolf scan` to generate, or wait for the first Claude Code session.",
+    "> Status: Pending initial scan"
+  ]
+}

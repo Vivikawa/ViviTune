@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "bugs": [
+    {
+      "error_message": "Missing error handling in Program.cs",
+      "file": "src/ViviTune.Tests/Program.cs",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-001",
+      "timestamp": "2026-10-04T17:39:33.798Z",
+      "last_seen": "2026-10-04T17:39:33.798Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Null/undefined access in Program.cs",
+      "file": "src/ViviTune.Tests/Program.cs",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-002",
+      "timestamp": "2026-10-04T17:41:58.917Z",
+      "last_seen": "2026-10-04T17:41:58.917Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Null/undefined access in Runner.cs",
+      "file": "src/ViviTune/Runner.cs",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-003",
+      "timestamp": "2026-10-18T12:45:07.436Z",
+      "last_seen": "2026-10-18T12:45:07.436Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Wrong reference: InvalidOperationException should be Exception",
+      "file": "src/ViviTune/Runner.cs",
+      "root_cause": "Used \"InvalidOperationException\" instead of \"Exception\"",
+      "fix": "Changed InvalidOperationException → Exception",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-004",
+      "timestamp": "2026-10-18T12:45:09.631Z",
+      "last_seen": "2026-10-18T12:45:09.631Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Wrong return value",
+      "file": "src/ViviTune/Settings.cs",
+      "root_cause": "Was returning: new JavaScriptSerializer().Deserialize<Settings>(F",
+      "fix": "Now returns: s;",
+      "tags": [
+        "auto-detected",
+        "return-value",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-005",
+      "timestamp": "2026-10-18T12:45:17.990Z",
+      "last_seen": "2026-10-18T12:45:17.990Z",
+      "occurrences": 1,
+      "related_bugs": []
+    }
+  ],
+  "applied_observations": {
+    "d883b910-f58c-4cf7-8ccf-e1a94c82dff6": true,
+    "d79276f3-547c-4a5c-85b7-3da09297e213": true,
+    "ef71a1c9-2b37-4782-8a7e-56fc7bc9dbde": true,
+    "d945afaf-111a-4e07-860f-27a339f403c2": true,
+    "3bdebe10-96b7-4b2f-ba67-41467c87b108": true
+  },
+  "next_id": 6
+}
