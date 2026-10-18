@@ -9,7 +9,7 @@ namespace ViviTune
     {
         public bool Reachable;
         public bool UdpSupported;
-        public string Error;
+        public string? Error;
     }
 
     public static class ProxyProbe
@@ -21,7 +21,7 @@ namespace ViviTune
             var r = new ProbeResult();
             try
             {
-                IPAddress addr;
+                IPAddress? addr;
                 if (!IPAddress.TryParse(ip, out addr)) { r.Error = "некорректный IP"; return r; }
                 using (var c = new TcpClient(addr.AddressFamily))
                 {

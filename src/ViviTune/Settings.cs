@@ -3,22 +3,24 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
-using System.Web.Script.Serialization;
+using System.Text.Json;
 
 namespace ViviTune
 {
     public class Settings
     {
-        public string Ip = "192.168.1.1";
-        public int Port = 1818;
-        public List<string> Apps = new List<string>();
+        static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
+
+        public string Ip { get; set; } = "192.168.1.1";
+        public int Port { get; set; } = 1818;
+        public List<string> Apps { get; set; } = new List<string>();
 
         public static Settings Load(string path)
         {
             try
             {
-                var s = new JavaScriptSerializer().Deserialize<Settings>(File.ReadAllText(path)) ?? new Settings();
-                if (s.Apps == null) s.Apps = new List<string>();
+                var s = JsonSerializer.Deserialize<Settings>(File.ReadAllText(path), Json) ?? new Settings();
+                s.Apps ??= new List<string>(); // JSON null в списке приложений
                 return s;
             }
             catch { return new Settings(); } // ponytail: нет файла или он битый: молча берём значения по умолчанию
@@ -26,14 +28,13 @@ namespace ViviTune
 
         public void Save(string path)
         {
-            File.WriteAllText(path, new JavaScriptSerializer().Serialize(this));
+            File.WriteAllText(path, JsonSerializer.Serialize(this, Json));
         }
 
         // null, если всё корректно; иначе текст ошибки для пользователя
-        public string Validate()
+        public string? Validate()
         {
-            IPAddress ip;
-            if (!IPAddress.TryParse(Ip, out ip)) return "Некорректный IP";
+            if (!IPAddress.TryParse(Ip, out _)) return "Некорректный IP";
             if (Port < 1 || Port > 65535) return "Порт должен быть от 1 до 65535";
             if (ProcessNames().Count == 0) return "Добавьте хотя бы одно приложение";
             return null;
@@ -45,7 +46,7 @@ namespace ViviTune
             var result = new List<string>();
             foreach (var path in Apps ?? new List<string>())
             {
-                string name;
+                string? name;
                 try { name = Path.GetFileName(path); }
                 catch (ArgumentException) { continue; } // недопустимые символы в пути
                 if (string.IsNullOrEmpty(name)) continue;

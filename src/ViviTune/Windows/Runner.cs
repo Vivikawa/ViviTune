@@ -3,16 +3,16 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 
-namespace ViviTune
+namespace ViviTune.Windows
 {
     public class Runner : IDisposable
     {
         readonly string _exe;
         readonly IntPtr _job;
-        Process _p;
+        Process? _p;
 
-        public event Action<string> Line;
-        public event Action Exited;
+        public event Action<string>? Line;
+        public event Action? Exited;
 
         public bool Running { get { return _p != null && !_p.HasExited; } }
 
@@ -48,7 +48,7 @@ namespace ViviTune
         public void Stop()
         {
             if (!Running) return;
-            try { _p.Kill(); _p.WaitForExit(3000); }
+            try { _p!.Kill(); _p.WaitForExit(3000); }
             catch (Exception e) when (e is InvalidOperationException || e is System.ComponentModel.Win32Exception) { } // уже завершился или не дали убить
         }
 
@@ -75,7 +75,7 @@ namespace ViviTune
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-        static extern IntPtr CreateJobObject(IntPtr attrs, string name);
+        static extern IntPtr CreateJobObject(IntPtr attrs, string? name);
         [DllImport("kernel32.dll")]
         static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint size);
         [DllImport("kernel32.dll")]

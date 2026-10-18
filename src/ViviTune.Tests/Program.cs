@@ -1,11 +1,6 @@
-using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.IO;
 using System.Net;
 using System.Net.Sockets;
-using System.Threading.Tasks;
-using System.Web.Script.Serialization;
+using System.Text.Json.Nodes;
 using ViviTune;
 
 static class Program
@@ -52,14 +47,15 @@ static class Program
         Check(Settings.Load(p).Ip == "192.168.1.1", "Load: нет файла, значения по умолчанию");
     }
 
-    static IDictionary<string, object> Cfg(Settings s)
-    {
-        return (IDictionary<string, object>)new JavaScriptSerializer().DeserializeObject(ConfigBuilder.Build(s));
-    }
+    static JsonObject Cfg(Settings s) => JsonNode.Parse(ConfigBuilder.Build(s))!.AsObject();
 
-    static IDictionary<string, object> Obj(object o) { return (IDictionary<string, object>)o; }
+    static JsonObject Obj(JsonNode? o) => o!.AsObject();
 
-    static int IndexOfRule(IList rules, string key)
+    static JsonArray Arr(JsonNode? o) => o!.AsArray();
+
+    static string? Str(JsonNode? o) => (string?)o;
+
+    static int IndexOfRule(JsonArray rules, string key)
     {
         for (int i = 0; i < rules.Count; i++)
             if (Obj(rules[i]).ContainsKey(key)) return i;
@@ -71,37 +67,37 @@ static class Program
         var s = new Settings { Ip = "192.168.1.1", Port = 1818, Apps = new List<string> { @"C:\a b\chrome.exe", @"C:\Игра\Игра.exe" } };
         var c = Cfg(s);
         var route = Obj(c["route"]);
-        var rules = (IList)route["rules"];
+        var rules = Arr(route["rules"]);
 
-        Check((string)route["final"] == "direct", "route.final = direct");
+        Check(Str(route["final"]) == "direct", "route.final = direct");
 
         int pi = IndexOfRule(rules, "process_name");
         var pr = Obj(rules[pi]);
-        var pn = (IList)pr["process_name"];
-        Check(pn.Count == 2 && (string)pn[0] == "chrome.exe" && (string)pn[1] == "Игра.exe" && (string)pr["outbound"] == "proxy",
+        var pn = Arr(pr["process_name"]);
+        Check(pn.Count == 2 && Str(pn[0]) == "chrome.exe" && Str(pn[1]) == "Игра.exe" && Str(pr["outbound"]) == "proxy",
             "правило process_name -> proxy (кириллица и пробелы в пути)");
 
         int xi = IndexOfRule(rules, "ip_cidr");
         var xr = Obj(rules[xi]);
-        Check((string)((IList)xr["ip_cidr"])[0] == "192.168.1.1/32" && (string)xr["outbound"] == "direct" && xi < pi,
+        Check(Str(Arr(xr["ip_cidr"])[0]) == "192.168.1.1/32" && Str(xr["outbound"]) == "direct" && xi < pi,
             "адрес прокси идёт напрямую и раньше правила приложений");
 
         Check(IndexOfRule(rules, "protocol") >= 0, "есть hijack-dns");
 
-        var dr = Obj(((IList)Obj(c["dns"])["rules"])[0]);
-        Check((string)dr["server"] == "proxy-dns" && ((IList)dr["process_name"]).Count == 2, "DNS выбранных приложений идёт через proxy-dns");
+        var dr = Obj(Arr(Obj(c["dns"])["rules"])[0]);
+        Check(Str(dr["server"]) == "proxy-dns" && Arr(dr["process_name"]).Count == 2, "DNS выбранных приложений идёт через proxy-dns");
 
         bool socksOk = false;
-        foreach (var o in (IList)c["outbounds"])
+        foreach (var o in Arr(c["outbounds"]))
         {
             var ob = Obj(o);
-            if ((string)ob["type"] == "socks") socksOk = (string)ob["server"] == "192.168.1.1" && (int)ob["server_port"] == 1818 && (string)ob["tag"] == "proxy";
+            if (Str(ob["type"]) == "socks") socksOk = Str(ob["server"]) == "192.168.1.1" && (int)ob["server_port"]! == 1818 && Str(ob["tag"]) == "proxy";
         }
         Check(socksOk, "socks outbound с адресом из настроек");
 
         var v6 = Cfg(new Settings { Ip = "::1", Port = 1, Apps = s.Apps });
-        var v6rules = (IList)Obj(v6["route"])["rules"];
-        Check((string)((IList)Obj(v6rules[IndexOfRule(v6rules, "ip_cidr")])["ip_cidr"])[0] == "::1/128", "IPv6-прокси исключается как /128");
+        var v6rules = Arr(Obj(v6["route"])["rules"]);
+        Check(Str(Arr(Obj(v6rules[IndexOfRule(v6rules, "ip_cidr")])["ip_cidr"])[0]) == "::1/128", "IPv6-прокси исключается как /128");
 
         bool threw = false;
         try { ConfigBuilder.Build(new Settings()); } catch (InvalidOperationException) { threw = true; }
@@ -109,7 +105,7 @@ static class Program
     }
 
     // Фейковый SOCKS5-сервер: на каждое соединение отвечает заданными байтами.
-    static int FakeServer(byte[] methodReply, byte[] udpReply, IPAddress bind = null)
+    static int FakeServer(byte[] methodReply, byte[]? udpReply, IPAddress? bind = null)
     {
         var l = new TcpListener(bind ?? IPAddress.Loopback, 0);
         l.Start();
@@ -119,10 +115,10 @@ static class Program
             {
                 var st = c.GetStream();
                 var buf = new byte[16];
-                st.Read(buf, 0, 3);
+                st.ReadExactly(buf, 0, 3);
                 st.Write(methodReply, 0, methodReply.Length);
                 if (udpReply == null) return;
-                st.Read(buf, 0, 10);
+                st.ReadExactly(buf, 0, 10);
                 st.Write(udpReply, 0, udpReply.Length);
             }
             l.Stop();

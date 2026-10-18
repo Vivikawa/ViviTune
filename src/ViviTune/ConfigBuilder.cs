@@ -2,12 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
-using System.Web.Script.Serialization;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 
 namespace ViviTune
 {
     public static class ConfigBuilder
     {
+        static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
         static Dictionary<string, object> D(params object[] kv)
         {
             var d = new Dictionary<string, object>();
@@ -54,7 +57,7 @@ namespace ViviTune
                     "auto_detect_interface", true,
                     "default_domain_resolver", "local"));
 
-            return new JavaScriptSerializer().Serialize(config);
+            return JsonSerializer.Serialize(config, Json);
         }
     }
 }

@@ -1,22 +1,22 @@
-using System;
-using System.Threading;
-using System.Windows.Forms;
+using Avalonia;
 
 namespace ViviTune
 {
     static class Program
     {
         [STAThread]
-        static void Main()
+        static int Main(string[] args)
         {
-            bool created;
-            using (var m = new Mutex(true, "ViviTune.SingleInstance", out created))
+            using var m = new Mutex(true, "ViviTune.SingleInstance", out bool created);
+            if (!created)
             {
-                if (!created) { MessageBox.Show("ViviTune уже запущен"); return; }
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new MainForm());
+                Windows.Native.Message("ViviTune уже запущен");
+                return 0;
             }
+            return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
+
+        public static AppBuilder BuildAvaloniaApp() =>
+            AppBuilder.Configure<Ui.App>().UsePlatformDetect().WithInterFont();
     }
 }
