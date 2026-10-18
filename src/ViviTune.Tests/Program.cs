@@ -18,6 +18,7 @@ static class Program
         SettingsTests();
         ConfigTests();
         ProbeTests();
+        TrafficTests();
         return failures == 0 ? 0 : 1;
     }
 
@@ -183,5 +184,93 @@ static class Program
         l.Stop();
         r = ProxyProbe.Probe("127.0.0.1", closed);
         Check(!r.Reachable && r.Error != null, "Probe: закрытый порт -> Reachable=false с текстом ошибки");
+    }
+
+    static IReadOnlyDictionary<string, ConnSample> Prev(params ConnSample[] c) => c.ToDictionary(x => x.Id);
+
+    const string CRLF = "\r\n";
+
+    static void TrafficTests()
+    {
+        var two = "{\"downloadTotal\":1,\"connections\":[{\"id\":\"a\",\"upload\":10,\"download\":20,\"chains\":[\"proxy\"]},{\"id\":\"b\",\"upload\":30,\"download\":40,\"chains\":[\"direct\"]}]}";
+        var p = TrafficMath.Parse(two);
+        Check(p.Count == 2 && p[0].ViaProxy && !p[1].ViaProxy && p[0].Upload == 10 && p[0].Download == 20 && p[1].Upload == 30 && p[1].Download == 40,
+            "Parse: proxy и direct");
+        bool junk = true;
+        foreach (var j in new[] { "not json", "", "{}", "{\"connections\":null}", "[1]" })
+            try { junk &= TrafficMath.Parse(j).Count == 0; } catch { junk = false; }
+        Check(junk, "Parse: мусор");
+
+        var s1 = TrafficMath.Delta(Prev(new ConnSample("a", 100, 1000, true)),
+            new[] { new ConnSample("a", 300, 5000, true), new ConnSample("b", 50, 50, false) }, 1);
+        Check(s1 == new Speed(200, 4000), "Delta: прирост только proxy");
+        var s2 = TrafficMath.Delta(Prev(), new[] { new ConnSample("c", 10, 20, true) }, 2);
+        Check(s2 == new Speed(5, 10), "Delta: новое соединение от нуля");
+        var s3 = TrafficMath.Delta(Prev(new ConnSample("a", 500, 500, true)), new[] { new ConnSample("a", 100, 100, true) }, 1);
+        Check(s3 == new Speed(0, 0), "Delta: счётчик уменьшился");
+        Check(TrafficMath.Delta(Prev(), new[] { new ConnSample("c", 10, 20, true) }, 0) == new Speed(0, 0), "Delta: seconds<=0");
+
+        Check(Format.Speed(0) == "0 Б/с" && Format.Speed(1536) == "1.5 КБ/с" && Format.Speed(8808038) == "8.4 МБ/с", "Format.Speed");
+        var old = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("ru-RU");
+        Check(Format.Speed(1536) == "1.5 КБ/с", "Format.Speed: не зависит от культуры");
+        System.Globalization.CultureInfo.CurrentCulture = old;
+        Check(Format.Uptime(new TimeSpan(0, 42, 17)) == "00:42:17" && Format.Uptime(TimeSpan.FromHours(100)) == "100:00:00", "Format.Uptime");
+
+        // закрытый порт
+        var l = new TcpListener(IPAddress.Loopback, 0);
+        l.Start();
+        int closed = ((IPEndPoint)l.LocalEndpoint).Port;
+        l.Stop();
+        Speed? got = null;
+        using (var m = new TrafficMeter(closed, "s"))
+        using (var ev = new ManualResetEventSlim())
+        {
+            m.Sample += s => { got = s; ev.Set(); };
+            m.Start();
+            bool arrived = ev.Wait(3000);
+            Check(arrived && got == new Speed(0, 0), "TrafficMeter: закрытый порт");
+        }
+
+        // фейковый Clash API
+        var l2 = new TcpListener(IPAddress.Loopback, 0);
+        l2.Start();
+        int port = ((IPEndPoint)l2.LocalEndpoint).Port;
+        var headers = new System.Collections.Concurrent.ConcurrentBag<string>();
+        int n = 0;
+        var cts = new CancellationTokenSource();
+        Task.Run(() =>
+        {
+            while (!cts.IsCancellationRequested)
+            {
+                try
+                {
+                    using var c = l2.AcceptTcpClient();
+                    c.ReceiveTimeout = 2000;
+                    var st = c.GetStream();
+                    var sb = new System.Text.StringBuilder();
+                    var b = new byte[1];
+                    while (!sb.ToString().EndsWith(CRLF + CRLF) && st.Read(b, 0, 1) == 1) sb.Append((char)b[0]);
+                    headers.Add(sb.ToString());
+                    int up = 100 + (Interlocked.Increment(ref n) >= 2 ? 1000 : 0);
+                    var body = "{\"connections\":[{\"id\":\"a\",\"upload\":" + up + ",\"download\":5,\"chains\":[\"proxy\"]}]}";
+                    var resp = string.Join(CRLF, "HTTP/1.1 200 OK", "Content-Type: application/json", "Content-Length: " + body.Length, "Connection: close", "", body);
+                    st.Write(System.Text.Encoding.ASCII.GetBytes(resp));
+                }
+                catch { }
+            }
+        });
+        double maxUp = 0;
+        using (var m = new TrafficMeter(port, "s"))
+        using (var ev = new ManualResetEventSlim())
+        {
+            m.Sample += s => { if (s.UpBps > maxUp) { maxUp = s.UpBps; ev.Set(); } };
+            m.Start();
+            ev.Wait(5000);
+        }
+        cts.Cancel();
+        l2.Stop();
+        Check(maxUp > 0, "TrafficMeter: фейковый Clash API даёт UpBps > 0");
+        Check(headers.Count > 0 && headers.All(h => h.Contains("Authorization: Bearer s") && h.StartsWith("GET /connections")), "TrafficMeter: заголовок Authorization");
     }
 }
