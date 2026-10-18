@@ -31,16 +31,50 @@ namespace ViviTune.Ui
             {
                 Ip = settings.Ip,
                 Port = settings.Port,
-                SettingsError = Settings.ValidateProxy(settings.Ip, settings.Port)
+                SettingsError = Settings.ValidateProxy(settings.Ip, settings.Port),
+                ListRunning = exclude => ProcessCatalog.Running(exclude).Select(a => (a.Path, a.Name)),
+                IconPng = ProcessCatalog.IconPng
             };
-            foreach (var a in settings.Apps)
-                state.Apps.Add(new AppRow
+
+            // Новые строки (с именем файла и плашкой) получают описание программы и иконку, не в UI-потоке.
+            // Файла нет — так и остаётся (имя из имени файла, плашка с буквой).
+            void SyncRows(List<AppEntry> apps)
+            {
+                var rows = state.SyncApps(apps);
+                if (rows.Count == 0) return;
+                Task.Run(() =>
                 {
-                    Path = a.Path,
-                    FileName = Path.GetFileName(a.Path),
-                    Name = Path.GetFileNameWithoutExtension(a.Path),
-                    Enabled = a.Enabled
+                    foreach (var r in rows)
+                    {
+                        var name = ProcessCatalog.DisplayName(r.Path);
+                        var icon = state.LoadIcon(r.Path);
+                        Dispatcher.UIThread.Post(() => { r.Name = name; r.Icon = icon; });
+                    }
                 });
+            }
+            SyncRows(settings.Apps);
+
+            // Settings.Apps не меняется на месте: Session снимает копию настроек в своих потоках.
+            // Новый список → Save → строки → Session.AppsChanged. Вызовы AppsChanged идут по очереди:
+            // каждый читает текущий Settings.Apps, так что последний вызов видит последнее состояние.
+            var appsChain = Task.CompletedTask;
+            void ChangeApps(Func<List<AppEntry>, bool> change)
+            {
+                var apps = AppListOps.Copy(settings.Apps);
+                if (!change(apps)) return;
+                settings.Apps = apps;
+                try { settings.Save(settingsPath); }
+                catch (Exception) { } // папка недоступна для записи: работаем без сохранения
+                SyncRows(apps);
+                appsChain = appsChain.ContinueWith(_ =>
+                {
+                    try { session.AppsChanged(); } // может отключать и ждать перезапуска: не в UI-потоке
+                    catch (Exception e) { Dispatcher.UIThread.Post(() => state.AddLog("Ошибка: " + e.Message)); }
+                }, TaskScheduler.Default);
+            }
+            state.AddAppRequested += path => ChangeApps(apps => AppListOps.Add(apps, path));
+            state.RemoveAppRequested += path => ChangeApps(apps => AppListOps.Remove(apps, path));
+            state.SetAppEnabledRequested += (path, on) => ChangeApps(apps => AppListOps.SetEnabled(apps, path, on));
 
             // Строка «время · UDP · приложения» под статусом: раз в секунду, только при Connected.
             var detailTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };

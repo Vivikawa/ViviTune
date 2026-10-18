@@ -1,9 +1,12 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using ViviTune;
 using ViviTune.Ui;
+using ViviTune.Windows;
 
 // Снимки окна без запуска sing-box: dotnet run --project src/ViviTune.Shots -- <outDir>
 var outDir = Path.GetFullPath(args.Length > 0 ? args[0] : Path.Combine("artifacts", "shots"));
@@ -43,8 +46,16 @@ s.PushSpeed(new Speed(0, 0));
 Shot(NavPage.Home, "home-error.png");
 s.ErrorText = null;
 
-foreach (var (page, file) in new[] { (NavPage.Apps, "apps.png"), (NavPage.Log, "log.png"), (NavPage.Settings, "settings.png") })
-    Shot(page, file);
+Shot(NavPage.Apps, "apps.png");
+var appsPage = window.GetVisualDescendants().OfType<AppsPage>().Single();
+appsPage.OpenAddPanel().Wait(); // список и иконки готовит фоновый поток; Shot применит его Post
+Shot(NavPage.Apps, "apps-add.png");
+appsPage.FindControl<TextBox>("SearchBox")!.Text = "st"; // поиск по имени без учёта регистра
+Shot(NavPage.Apps, "apps-add-search.png");
+Shot(NavPage.Log, "log.png"); // уход со страницы закрывает панель
+Shot(NavPage.Settings, "settings.png");
+s.Apps.Clear();
+Shot(NavPage.Apps, "apps-empty.png");
 window.Close();
 return 0;
 
@@ -64,7 +75,24 @@ void Shot(NavPage page, string file)
 
 static ViewState Demo()
 {
-    var s = new ViewState { Ip = "192.168.1.1", Port = 1818 };
+    // «Запущены сейчас»: Discord (в другом регистре) уже добавлен и не должен попасть в панель;
+    // у Проводника настоящая иконка, у остальных (файлов нет) — плашки с буквой, как в макете.
+    var running = new (string Path, string Name)[]
+    {
+        (@"C:\USERS\ME\APPDATA\LOCAL\DISCORD\APP-1.0.9200\DISCORD.EXE", "Discord"),
+        (@"C:\Program Files\obs-studio\bin\64bit\obs64.exe", "OBS Studio"),
+        (@"C:\Users\me\AppData\Roaming\Spotify\Spotify.exe", "Spotify"),
+        (@"C:\Program Files (x86)\Steam\steam.exe", "Steam"),
+        (@"C:\Users\me\AppData\Roaming\Telegram Desktop\Telegram.exe", "Telegram"),
+        (Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "Проводник")
+    };
+    var s = new ViewState
+    {
+        Ip = "192.168.1.1",
+        Port = 1818,
+        ListRunning = exclude => running.Where(r => !exclude.Contains(r.Path, StringComparer.OrdinalIgnoreCase)),
+        IconPng = ProcessCatalog.IconPng
+    };
     s.Apps.Add(new AppRow { Path = @"C:\Users\me\AppData\Local\Discord\app-1.0.9200\Discord.exe", FileName = "Discord.exe", Name = "Discord", Enabled = true });
     s.Apps.Add(new AppRow { Path = @"C:\Program Files\Google\Chrome\Application\chrome.exe", FileName = "chrome.exe", Name = "Google Chrome", Enabled = false });
     for (int i = 0; i < 6; i++)

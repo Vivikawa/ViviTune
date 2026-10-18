@@ -24,7 +24,43 @@ static class Program
         SessionTests();
         CatalogTests();
         ViewStateTests();
+        AppListTests();
         return failures == 0 ? 0 : 1;
+    }
+
+    static void AppListTests()
+    {
+        var apps = new List<AppEntry> { new() { Path = @"C:\Games\Game.exe", Enabled = false } };
+        Check(!AppListOps.Add(apps, @"c:\games\GAME.EXE") && apps.Count == 1 && !apps[0].Enabled,
+            "AppList: добавление без дублей (тот же путь в другом регистре -> false)");
+        Check(!AppListOps.Add(apps, "  ") && apps.Count == 1, "AppList: пустой путь не добавляется");
+        Check(AppListOps.Add(apps, @"C:\Apps\Discord.exe") && apps.Count == 2 && apps[1].Path == @"C:\Apps\Discord.exe" && apps[1].Enabled,
+            "AppList: новое добавляется в конец и сразу включено");
+        Check(AppListOps.SetEnabled(apps, @"C:\GAMES\game.exe", true) && apps[0].Enabled
+            && !AppListOps.SetEnabled(apps, @"C:\games\game.exe", true) && !AppListOps.SetEnabled(apps, @"C:\нет.exe", false),
+            "AppList: SetEnabled по пути без учёта регистра (без изменений -> false)");
+        Check(AppListOps.Remove(apps, @"c:\apps\DISCORD.exe") && apps.Count == 1 && apps[0].Path == @"C:\Games\Game.exe"
+            && !AppListOps.Remove(apps, @"C:\нет.exe"), "AppList: Remove по пути без учёта регистра");
+        var dup = new List<AppEntry> { new() { Path = @"C:\a.exe" }, new() { Path = @"C:\A.EXE" } }; // дубль из старого settings.json
+        Check(AppListOps.Remove(dup, @"c:\a.exe") && dup.Count == 0, "AppList: Remove убирает и дубли в другом регистре");
+        var orig = new List<AppEntry> { new() { Path = @"C:\a.exe" } };
+        var copy = AppListOps.Copy(orig);
+        AppListOps.SetEnabled(copy, @"C:\a.exe", false);
+        AppListOps.Add(copy, @"C:\b.exe");
+        Check(orig.Count == 1 && orig[0].Enabled && copy.Count == 2 && !copy[0].Enabled && !ReferenceEquals(orig[0], copy[0]),
+            "AppList: Copy — новый список с новыми элементами (Settings.Apps на месте не меняется)");
+
+        var v = new ViewState();
+        var first = v.SyncApps(new List<AppEntry> { new() { Path = @"C:\Apps\Discord.exe" }, new() { Path = @"C:\Apps\chrome.exe", Enabled = false } });
+        var discord = v.Apps[0];
+        Check(first.Count == 2 && v.Apps.Count == 2 && discord.Name == "Discord" && discord.FileName == "Discord.exe" && discord.Enabled
+            && !v.Apps[1].Enabled, "ViewState.SyncApps: строки по списку (имя из имени файла)");
+        var added = v.SyncApps(new List<AppEntry> { new() { Path = @"c:\apps\DISCORD.exe", Enabled = false }, new() { Path = @"C:\Apps\Steam.exe" } });
+        Check(added.Count == 1 && added[0].Path == @"C:\Apps\Steam.exe" && v.Apps.Count == 2 && ReferenceEquals(v.Apps[0], discord)
+            && !discord.Enabled && v.Apps[1] == added[0], "ViewState.SyncApps: лишние убраны, новые вставлены, старые строки сохранены");
+        v.SyncApps(new List<AppEntry> { new() { Path = @"C:\a.exe" }, new() { Path = @"C:\A.EXE" } }); // дубль из старого settings.json
+        v.SyncApps(new List<AppEntry> { new() { Path = @"C:\a.exe", Enabled = false }, new() { Path = @"C:\A.EXE", Enabled = false } });
+        Check(v.Apps.Count == 2 && v.Apps.All(r => !r.Enabled), "ViewState.SyncApps: дубли в другом регистре обновляются оба");
     }
 
     static void CatalogTests()
