@@ -27,8 +27,21 @@ public sealed class ViewState : INotifyPropertyChanged
     public ConnState State
     {
         get => state;
-        set { if (Set(ref state, value)) Notify(nameof(StatusText), nameof(SettingsEditable)); }
+        set
+        {
+            if (!Set(ref state, value)) return;
+            if (value == ConnState.Disconnected) // без подключения — нули: старый график не держим
+            {
+                UpHistory.Clear();
+                DownHistory.Clear();
+            }
+            Notify(nameof(StatusText), nameof(SettingsEditable), nameof(IsBusy), nameof(IsConnected));
+        }
     }
+
+    // Проверка или перезапуск: кольцо крутится, кнопка неактивна.
+    public bool IsBusy => state is ConnState.Checking or ConnState.Restarting;
+    public bool IsConnected => state == ConnState.Connected;
 
     public string StatusText => state switch
     {
@@ -49,8 +62,10 @@ public sealed class ViewState : INotifyPropertyChanged
     public string ProxyLabel => $"SOCKS5 · {ip}:{port}";
     public string? SettingsError { get => settingsError; set => Set(ref settingsError, value); }
 
-    public double UpBps { get => upBps; private set => Set(ref upBps, value); }
-    public double DownBps { get => downBps; private set => Set(ref downBps, value); }
+    public double UpBps { get => upBps; private set { if (Set(ref upBps, value)) Notify(nameof(UpText)); } }
+    public double DownBps { get => downBps; private set { if (Set(ref downBps, value)) Notify(nameof(DownText)); } }
+    public string UpText => Format.Speed(upBps);
+    public string DownText => Format.Speed(downBps);
     public ObservableCollection<double> UpHistory { get; } = new();
     public ObservableCollection<double> DownHistory { get; } = new();
 
@@ -66,6 +81,14 @@ public sealed class ViewState : INotifyPropertyChanged
     }
 
     public void AddLog(string line) => Push(LogLines, line, LogMax);
+
+    // Строка под статусом при подключении: «00:42:17 · UDP ✓ · 2 прилож.»; UDP неизвестен — без него.
+    public static string Detail(TimeSpan up, bool? udp, int apps)
+    {
+        var time = Format.Uptime(up < TimeSpan.Zero ? TimeSpan.Zero : up);
+        var u = udp switch { true => " · UDP ✓", false => " · UDP ✗", null => "" };
+        return $"{time}{u} · {apps} прилож.";
+    }
 
     public void RequestToggle() => ToggleRequested?.Invoke();
     public void RequestAddApp(string path) => AddAppRequested?.Invoke(path);

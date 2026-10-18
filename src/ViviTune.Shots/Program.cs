@@ -16,9 +16,39 @@ AppBuilder.Configure<App>()
     .WithInterFont()
     .SetupWithoutStarting();
 
-var window = new MainWindow(Demo()) { Width = 900, Height = 600 };
+var s = Demo();
+var window = new MainWindow(s) { Width = 900, Height = 600 };
 window.Show();
-foreach (var (page, file) in new[] { (NavPage.Home, "home.png"), (NavPage.Apps, "apps.png"), (NavPage.Log, "log.png"), (NavPage.Settings, "settings.png") })
+int enabled = s.Apps.Count(a => a.Enabled);
+
+// Главная в разных состояниях (DetailText и WarningText в приложении ставит App по Session)
+Shot(NavPage.Home, "home-disconnected.png");
+s.State = ConnState.Checking;
+Shot(NavPage.Home, "home-checking.png");
+s.State = ConnState.Connected;
+s.DetailText = ViewState.Detail(new TimeSpan(0, 42, 17), true, enabled);
+const double MiB = 1024 * 1024;
+for (int i = 0; i < 60; i++) // демо-история: волны и всплеск отдачи; последнее значение как в макете (1.2 и 8.4 МБ/с)
+    s.PushSpeed(new Speed(1.2 * MiB * (1 + 0.45 * Math.Sin((i - 59) / 4.5)) + (i == 40 ? 1.6 * MiB : 0),
+                          8.4 * MiB * (1 + 0.5 * Math.Sin((i - 59) / 6.0))));
+Shot(NavPage.Home, "home-connected.png");
+s.DetailText = ViewState.Detail(new TimeSpan(0, 3, 5), false, enabled);
+s.WarningText = "UDP через этот прокси не работает: игры и голосовая связь могут не заработать.";
+Shot(NavPage.Home, "home-connected-noudp.png");
+s.State = ConnState.Disconnected; // как Session: ошибка, затем нулевая скорость
+s.DetailText = "";
+s.WarningText = null;
+s.ErrorText = "Прокси недоступен: таймаут подключения";
+s.PushSpeed(new Speed(0, 0));
+Shot(NavPage.Home, "home-error.png");
+s.ErrorText = null;
+
+foreach (var (page, file) in new[] { (NavPage.Apps, "apps.png"), (NavPage.Log, "log.png"), (NavPage.Settings, "settings.png") })
+    Shot(page, file);
+window.Close();
+return 0;
+
+void Shot(NavPage page, string file)
 {
     window.ShowPage(page);
     for (int i = 0; i < 3; i++) // разметка, затем отложенные действия страниц (прокрутка лога вниз)
@@ -31,15 +61,12 @@ foreach (var (page, file) in new[] { (NavPage.Home, "home.png"), (NavPage.Apps, 
     frame.Save(path, PngBitmapEncoderOptions.Default);
     Console.WriteLine(path);
 }
-window.Close();
-return 0;
 
 static ViewState Demo()
 {
     var s = new ViewState { Ip = "192.168.1.1", Port = 1818 };
     s.Apps.Add(new AppRow { Path = @"C:\Users\me\AppData\Local\Discord\app-1.0.9200\Discord.exe", FileName = "Discord.exe", Name = "Discord", Enabled = true });
     s.Apps.Add(new AppRow { Path = @"C:\Program Files\Google\Chrome\Application\chrome.exe", FileName = "chrome.exe", Name = "Google Chrome", Enabled = false });
-    for (int i = 0; i < 60; i++) s.PushSpeed(new Speed(1.2e6 * (0.5 + 0.5 * Math.Sin(i / 5.0)), 8.4e6 * (0.5 + 0.5 * Math.Cos(i / 7.0))));
     for (int i = 0; i < 6; i++)
     {
         s.AddLog($"+0300 2026-10-18 21:{14 + i:00}:03 WARN [{3810 + i} 12ms] inbound/tun[tun-in]: process connection from 172.19.0.1:{51200 + i} to 162.159.135.232:443: connection reset by peer");

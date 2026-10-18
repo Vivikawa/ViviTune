@@ -42,11 +42,24 @@ namespace ViviTune.Ui
                     Enabled = a.Enabled
                 });
 
+            // Строка «время · UDP · приложения» под статусом: раз в секунду, только при Connected.
+            var detailTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            void UpdateDetail()
+            {
+                var since = session.ConnectedSince;
+                state.DetailText = state.State == ConnState.Connected && since != null
+                    ? ViewState.Detail(DateTime.Now - since.Value, session.UdpOk, state.Apps.Count(a => a.Enabled))
+                    : "";
+            }
+            detailTimer.Tick += (_, _) => UpdateDetail();
+
             void Sync()
             {
                 state.State = session.State;
                 state.ErrorText = session.Error;
                 state.WarningText = session.UdpOk == false ? NoUdpWarning : null;
+                UpdateDetail();
+                detailTimer.IsEnabled = state.State == ConnState.Connected;
             }
 
             // События Session приходят из любых потоков (Speed — под её блокировкой): только Post, никогда Invoke.
@@ -78,6 +91,7 @@ namespace ViviTune.Ui
             var window = new MainWindow(state);
             window.Closed += (_, _) =>
             {
+                detailTimer.Stop();
                 session.Dispose(); // останавливает sing-box
                 runner.Dispose();  // Session его не освобождает
             };

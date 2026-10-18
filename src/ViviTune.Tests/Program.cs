@@ -129,6 +129,54 @@ static class Program
         v.RequestSetProxy("10.0.0.1", 1080); // поля страницы заполнены теми же значениями (старт)
         v.RequestSetProxy("10.0.0.2", 1080);
         Check(proxyEvents == 1, "ViewState: RequestSetProxy без изменений не поднимает событие (settings.json не пишется при старте)");
+
+        Check(ViewState.Detail(new TimeSpan(0, 42, 17), true, 2) == "00:42:17 · UDP ✓ · 2 прилож.", "ViewState.Detail: время, UDP ✓, приложения");
+        Check(ViewState.Detail(TimeSpan.FromSeconds(5), false, 1) == "00:00:05 · UDP ✗ · 1 прилож.", "ViewState.Detail: UDP ✗");
+        Check(ViewState.Detail(TimeSpan.FromSeconds(5), null, 1) == "00:00:05 · 1 прилож.", "ViewState.Detail: UDP неизвестен -> без UDP");
+        Check(ViewState.Detail(TimeSpan.FromSeconds(-3), true, 1) == "00:00:00 · UDP ✓ · 1 прилож.", "ViewState.Detail: отрицательное время -> 00:00:00");
+
+        var b = new ViewState();
+        bool idle = !b.IsBusy && !b.IsConnected;
+        b.State = ConnState.Checking;
+        bool checking = b.IsBusy && !b.IsConnected;
+        b.State = ConnState.Restarting;
+        bool restarting = b.IsBusy && !b.IsConnected;
+        b.State = ConnState.Connected;
+        Check(idle && checking && restarting && b.IsConnected && !b.IsBusy, "ViewState: IsBusy (проверка/перезапуск), IsConnected");
+        var changed = new List<string>();
+        b.PropertyChanged += (_, e) => changed.Add(e.PropertyName ?? "");
+        b.PushSpeed(new Speed(1536, 8808038));
+        Check(b.UpText == "1.5 КБ/с" && b.DownText == "8.4 МБ/с" && changed.Contains(nameof(ViewState.UpText)) && changed.Contains(nameof(ViewState.DownText)),
+            "ViewState: UpText/DownText через Format.Speed с уведомлением");
+        b.State = ConnState.Restarting;
+        bool kept = b.UpHistory.Count == 1;
+        changed.Clear();
+        b.State = ConnState.Disconnected;
+        Check(kept && b.UpHistory.Count == 0 && b.DownHistory.Count == 0 && changed.Contains(nameof(ViewState.IsBusy)) && changed.Contains(nameof(ViewState.IsConnected)),
+            "ViewState: при отключении история скорости очищается (без подключения — нули)");
+
+        SparklineTests();
+    }
+
+    static double[] Levels(params double[] values)
+    {
+        var l = new double[6];
+        Sparkline.Levels(values, l);
+        return l;
+    }
+
+    static void SparklineTests()
+    {
+        Check(Levels().All(x => x == 0), "Sparkline.Levels: пусто -> ровная линия у низа");
+        Check(Levels(0, 0, 0).All(x => x == 0), "Sparkline.Levels: одни нули -> ровная линия у низа");
+        var one = Levels(5);
+        Check(one[5] == 1 && one.Take(5).All(x => x == 0), "Sparkline.Levels: одно значение справа, слева нули");
+        var burst = Levels(1, 1, 100, 1);
+        Check(burst[4] == 1 && Math.Abs(burst[5] - 0.01) < 1e-9 && burst[0] == 0 && burst[1] == 0, "Sparkline.Levels: всплеск -> масштаб по максимуму");
+        var many = Levels(9, 9, 9, 1, 2, 3, 4, 5, 6);
+        Check(many[0] == 1.0 / 6 && many[5] == 1, "Sparkline.Levels: больше значений, чем точек -> последние");
+        Check(Levels(-5, double.NaN, double.PositiveInfinity, 2).SequenceEqual(new double[] { 0, 0, 0, 0, 0, 1 }),
+            "Sparkline.Levels: отрицательные, NaN и бесконечность -> 0");
     }
 
     static JsonObject Cfg(Settings s) => JsonNode.Parse(ConfigBuilder.Build(s, 9090, "t"))!.AsObject();

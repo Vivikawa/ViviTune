@@ -1,6 +1,129 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             x:Class="ViviTune.Ui.HomePage">
-  <!-- Заглушка: страницу делает Task 8 -->
-  <TextBlock Classes="title" Text="Главная" Margin="24,18" />
+             xmlns:ui="using:ViviTune.Ui"
+             x:Class="ViviTune.Ui.HomePage"
+             x:DataType="ui:ViewState">
+  <UserControl.Resources>
+    <LinearGradientBrush x:Key="RingGradient" StartPoint="0%,0%" EndPoint="100%,100%">
+      <GradientStop Offset="0" Color="#22d3ee" />
+      <GradientStop Offset="1" Color="#8b5cf6" />
+    </LinearGradientBrush>
+
+    <!-- Круглая кнопка: кольцо, круг со значком питания.
+         Отключено — серое кольцо; .busy — по кольцу бежит дуга, кнопка неактивна; .connected — кольцо-градиент со свечением. -->
+    <ControlTheme x:Key="PowerButton" TargetType="Button">
+      <Setter Property="Width" Value="142" />
+      <Setter Property="Height" Value="142" />
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="ClipToBounds" Value="False" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Panel>
+            <Ellipse Name="Ring" Stroke="#2a2f4d" StrokeThickness="3" />
+            <Arc Name="Spinner" IsVisible="False" Stroke="{StaticResource RingGradient}" StrokeThickness="3"
+                 StrokeLineCap="Round" StartAngle="-90" SweepAngle="110" RenderTransformOrigin="50%,50%">
+              <Arc.RenderTransform>
+                <RotateTransform />
+              </Arc.RenderTransform>
+            </Arc>
+            <Border Name="Face" Width="130" Height="130" CornerRadius="65">
+              <Border.Background>
+                <RadialGradientBrush Center="50%,40%" GradientOrigin="50%,40%" RadiusX="78%" RadiusY="78%">
+                  <GradientStop Offset="0" Color="#1e2340" />
+                  <GradientStop Offset="1" Color="#11142a" />
+                </RadialGradientBrush>
+              </Border.Background>
+              <Viewbox Width="44" Height="44">
+                <Path Width="24" Height="24" Data="M12,3 L12,12 M6.86,6.87 A8,8 0 1 0 17.14,6.87"
+                      Stroke="{TemplateBinding Foreground}" StrokeThickness="2.2" StrokeLineCap="Round" />
+              </Viewbox>
+            </Border>
+          </Panel>
+        </ControlTemplate>
+      </Setter>
+      <Style Selector="^:pointerover">
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+      </Style>
+      <Style Selector="^:disabled">
+        <Setter Property="Cursor" Value="Arrow" />
+      </Style>
+      <Style Selector="^.connected">
+        <Setter Property="Foreground" Value="{StaticResource Accent1Brush}" />
+      </Style>
+      <Style Selector="^.connected /template/ Ellipse#Ring">
+        <Setter Property="Stroke" Value="{StaticResource RingGradient}" />
+      </Style>
+      <Style Selector="^.connected /template/ Border#Face">
+        <Setter Property="BoxShadow" Value="0 0 38 0 #5922d3ee" />
+      </Style>
+      <Style Selector="^.busy /template/ Arc#Spinner">
+        <Setter Property="IsVisible" Value="True" />
+        <Style.Animations>
+          <Animation Duration="0:0:1.2" IterationCount="Infinite">
+            <KeyFrame Cue="0%">
+              <Setter Property="RotateTransform.Angle" Value="0" />
+            </KeyFrame>
+            <KeyFrame Cue="100%">
+              <Setter Property="RotateTransform.Angle" Value="360" />
+            </KeyFrame>
+          </Animation>
+        </Style.Animations>
+      </Style>
+    </ControlTheme>
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <Style Selector="TextBlock.ok">
+      <Setter Property="Foreground" Value="{StaticResource OkBrush}" />
+    </Style>
+    <Style Selector="TextBlock.speed">
+      <Setter Property="FontSize" Value="22" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,4,0,0" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*,Auto" Margin="24,18,24,24">
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock Classes="title" Text="Главная" VerticalAlignment="Center" />
+      <Border Grid.Column="1" Background="{StaticResource CardBrush}" CornerRadius="20" Padding="12,5">
+        <TextBlock Classes="muted" Text="{Binding ProxyLabel}" />
+      </Border>
+    </Grid>
+
+    <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center">
+      <Button Name="Power" Theme="{StaticResource PowerButton}" HorizontalAlignment="Center"
+              IsEnabled="{Binding !IsBusy}" Classes.busy="{Binding IsBusy}" Classes.connected="{Binding IsConnected}"
+              AutomationProperties.Name="Подключение" />
+      <TextBlock Text="{Binding StatusText}" Classes.ok="{Binding IsConnected}" HorizontalAlignment="Center"
+                 FontSize="16" FontWeight="SemiBold" Margin="0,18,0,0" />
+      <!-- место под строки ниже держится, чтобы кнопка не прыгала при их появлении -->
+      <StackPanel Width="540" MinHeight="64" Spacing="6" Margin="0,4,0,0">
+        <TextBlock Classes="muted" FontSize="13" HorizontalAlignment="Center" Text="{Binding DetailText}"
+                   IsVisible="{Binding DetailText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        <TextBlock Classes="error" TextAlignment="Center" Text="{Binding ErrorText}"
+                   IsVisible="{Binding ErrorText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        <TextBlock Classes="warning" TextAlignment="Center" Text="{Binding WarningText}"
+                   IsVisible="{Binding WarningText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+      </StackPanel>
+    </StackPanel>
+
+    <Grid Grid.Row="2" ColumnDefinitions="*,12,*">
+      <Border Classes="card">
+        <StackPanel>
+          <TextBlock Classes="muted" Text="↑ Отдача через прокси" />
+          <TextBlock Classes="speed" Foreground="{StaticResource Accent2Brush}" Text="{Binding UpText}" />
+          <ui:Sparkline Height="44" Margin="0,10,0,0" Stroke="{StaticResource Accent2Brush}" Values="{Binding UpHistory}" />
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="2" Classes="card">
+        <StackPanel>
+          <TextBlock Classes="muted" Text="↓ Загрузка через прокси" />
+          <TextBlock Classes="speed" Foreground="{StaticResource Accent1Brush}" Text="{Binding DownText}" />
+          <ui:Sparkline Height="44" Margin="0,10,0,0" Stroke="{StaticResource Accent1Brush}" Values="{Binding DownHistory}" />
+        </StackPanel>
+      </Border>
+    </Grid>
+  </Grid>
 </UserControl>
