@@ -71,7 +71,13 @@ public sealed class ViewState : INotifyPropertyChanged
     public void RequestAddApp(string path) => AddAppRequested?.Invoke(path);
     public void RequestRemoveApp(string path) => RemoveAppRequested?.Invoke(path);
     public void RequestSetAppEnabled(string path, bool enabled) => SetAppEnabledRequested?.Invoke(path, enabled);
-    public void RequestSetProxy(string ip, int port) => SetProxyRequested?.Invoke(ip, port);
+    // Ip/Port здесь — то, что сейчас в Settings (App держит их вместе). Без изменений события нет:
+    // иначе заполнение полей страницы при старте (TextChanged приходит позже, асинхронно) перезаписывало бы settings.json.
+    public void RequestSetProxy(string ip, int port)
+    {
+        if (ip == Ip && port == Port) return;
+        SetProxyRequested?.Invoke(ip, port);
+    }
 
     static void Push<T>(ObservableCollection<T> list, T value, int max)
     {

@@ -6,8 +6,6 @@ namespace ViviTune.Ui
     // Поля IP и порта: каждое изменение уходит в ViewState.RequestSetProxy (App проверяет и сохраняет).
     public partial class SettingsPage : UserControl
     {
-        bool filling;
-
         public SettingsPage()
         {
             InitializeComponent();
@@ -20,15 +18,14 @@ namespace ViviTune.Ui
         {
             base.OnDataContextChanged(e);
             if (DataContext is not ViewState s) return;
-            filling = true;
+            // TextChanged от этого заполнения придёт с теми же значениями: RequestSetProxy его пропустит
             IpBox.Text = s.Ip;
             PortBox.Text = s.Port.ToString(CultureInfo.InvariantCulture);
-            filling = false;
         }
 
         void Push()
         {
-            if (filling || DataContext is not ViewState s) return;
+            if (DataContext is not ViewState s) return;
             // нечисловой порт — 0: App покажет «Порт должен быть от 1 до 65535»
             int.TryParse(PortBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port);
             s.RequestSetProxy((IpBox.Text ?? "").Trim(), port);

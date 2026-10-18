@@ -124,6 +124,11 @@ static class Program
         v.State = ConnState.Connected;
         Check(v.ProxyLabel == "SOCKS5 · 10.0.0.1:1080" && !v.SettingsEditable && v.StatusText == "Подключено",
             "ViewState: ProxyLabel, SettingsEditable, StatusText");
+        int proxyEvents = 0;
+        v.SetProxyRequested += (_, _) => proxyEvents++;
+        v.RequestSetProxy("10.0.0.1", 1080); // поля страницы заполнены теми же значениями (старт)
+        v.RequestSetProxy("10.0.0.2", 1080);
+        Check(proxyEvents == 1, "ViewState: RequestSetProxy без изменений не поднимает событие (settings.json не пишется при старте)");
     }
 
     static JsonObject Cfg(Settings s) => JsonNode.Parse(ConfigBuilder.Build(s, 9090, "t"))!.AsObject();
