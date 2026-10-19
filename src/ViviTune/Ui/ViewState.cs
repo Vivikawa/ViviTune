@@ -20,7 +20,7 @@ public sealed class ViewState : INotifyPropertyChanged
     long upTotal, downTotal;
     int port;
     int? directPort;
-    bool directTab;
+    bool directTab, proxyDown, bypassDown;
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event Action? ToggleRequested;
@@ -88,7 +88,7 @@ public sealed class ViewState : INotifyPropertyChanged
     public bool DirectTab
     {
         get => directTab;
-        set { if (Set(ref directTab, value)) Notify(nameof(ShownApps), nameof(EmptyText), nameof(DirectHintVisible)); }
+        set { if (Set(ref directTab, value)) Notify(nameof(ShownApps), nameof(EmptyText), nameof(DirectHintVisible), nameof(ExitDownHint)); }
     }
     public ObservableCollection<AppRow> ShownApps => directTab ? DirectApps : Apps;
     public string ProxyTabText => $"Через прокси · {Apps.Count(a => a.Enabled)}";
@@ -99,6 +99,13 @@ public sealed class ViewState : INotifyPropertyChanged
     public int? DirectPort { get => directPort; set { if (Set(ref directPort, value)) Notify(nameof(DirectHintVisible)); } }
     // Вкладка «Мимо Podkop» без порта: подсказать, где его задать
     public bool DirectHintVisible => directTab && directPort == null;
+    // Выход списка не отвечает при подключении: программы идут обычным путём (ставит App по Session.Live)
+    public bool ProxyDown { get => proxyDown; set { if (Set(ref proxyDown, value)) Notify(nameof(ExitDownHint)); } }
+    public bool BypassDown { get => bypassDown; set { if (Set(ref bypassDown, value)) Notify(nameof(ExitDownHint)); } }
+    public string? ExitDownHint =>
+        directTab && bypassDown ? "Порт «Мимо Podkop» не отвечает: программы из этой вкладки сейчас идут обычным путём."
+        : !directTab && proxyDown ? "Прокси не отвечает: программы из этой вкладки сейчас идут обычным путём."
+        : null;
     public ObservableCollection<string> LogLines { get; } = new();
 
     // Источники для страницы Приложения; зовутся НЕ в UI-потоке. App даёт ProcessCatalog, Shots — демо.

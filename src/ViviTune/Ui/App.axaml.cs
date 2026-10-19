@@ -104,11 +104,14 @@ namespace ViviTune.Ui
                 state.State = session.State;
                 state.ErrorText = session.Error;
                 state.WarningText = session.Warnings.Count > 0 ? string.Join("\n", session.Warnings) : null;
+                bool live = state.State is ConnState.Connected or ConnState.Restarting;
+                state.ProxyDown = live && state.Apps.Any(a => a.Enabled) && !session.Live.Proxy;
+                state.BypassDown = live && state.DirectPort != null && state.DirectApps.Any(a => a.Enabled) && !session.Live.Bypass;
                 UpdateDetail();
                 detailTimer.IsEnabled = state.State == ConnState.Connected;
                 toggleItem.Header = state.State == ConnState.Disconnected ? "Подключить" : "Отключить";
                 toggleItem.IsEnabled = !state.IsBusy; // как кнопка на Главной
-                tray.ToolTipText = "ViviTune: " + state.StatusText;
+                tray.ToolTipText = "ViviTune: " + state.StatusText + (session.Warnings.Count > 0 ? " · есть предупреждения" : "");
             }
 
             // События Session приходят из любых потоков (Speed — под её блокировкой): только Post, никогда Invoke.

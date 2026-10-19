@@ -229,6 +229,21 @@ static class Program
         v.RequestSetProxy("10.0.0.2", 1080, null);
         Check(proxyEvents == 1, "ViewState: RequestSetProxy без изменений не поднимает событие (settings.json не пишется при старте)");
 
+        var hs = new ViewState();
+        const string proxyHint = "Прокси не отвечает: программы из этой вкладки сейчас идут обычным путём.";
+        const string bypassHint = "Порт «Мимо Podkop» не отвечает: программы из этой вкладки сейчас идут обычным путём.";
+        hs.ProxyDown = true;
+        Check(hs.ExitDownHint == proxyHint, "ViewState.ExitDownHint: вкладка прокси, прокси не отвечает");
+        hs.ProxyDown = false;
+        Check(hs.ExitDownHint == null, "ViewState.ExitDownHint: вкладка прокси, прокси жив");
+        hs.DirectTab = true;
+        hs.BypassDown = true;
+        Check(hs.ExitDownHint == bypassHint, "ViewState.ExitDownHint: вкладка «Мимо Podkop», порт не отвечает");
+        hs.ProxyDown = true; // чужая вкладка не мешает
+        Check(hs.ExitDownHint == bypassHint, "ViewState.ExitDownHint: на вкладке «Мимо Podkop» прокси не важен");
+        hs.BypassDown = false;
+        Check(hs.ExitDownHint == null, "ViewState.ExitDownHint: вкладка «Мимо Podkop», порт жив");
+
         Check(ViewState.Detail(new TimeSpan(0, 42, 17), true, 2, 2) == "00:42:17 · TCP + UDP · 2 через прокси · 2 мимо Podkop", "ViewState.Detail: оба списка");
         Check(ViewState.Detail(TimeSpan.FromSeconds(5), false, 1, 0) == "00:00:05 · только TCP · 1 через прокси", "ViewState.Detail: без UDP, нулевая часть не пишется");
         Check(ViewState.Detail(TimeSpan.FromSeconds(5), null, 0, 3) == "00:00:05 · 3 мимо Podkop", "ViewState.Detail: прокси не жив -> без протоколов");
@@ -394,6 +409,7 @@ static class Program
         var bp = B(new Exits(false, true));
         Check(AppRule(R(bp), "proxy") == null && AppRule(R(bp), "bypass") != null && Arr(Obj(bp["dns"])["rules"]).Count == 0,
             "жив только bypass: нет правила proxy и DNS-правила proxy-dns");
+        Check(HasOut(bp, "proxy"), "жив только bypass: outbound proxy остаётся (на него ссылается detour proxy-dns)");
 
         var onlyDirect = new Settings { Port = 1818, DirectPort = 1819, DirectApps = A(@"C:\q\qbittorrent.exe") };
         var od = JsonNode.Parse(ConfigBuilder.Build(onlyDirect, 9090, "t"))!.AsObject();
@@ -874,6 +890,31 @@ static class Program
                 Check(fb.Starts == 2 && AppRule(rules, "proxy") == null
                     && Arr(AppRule(rules, "bypass")!["process_name"]).Select(x => Str(x)).OrderBy(x => x).SequenceEqual(new[] { "chrome.exe", "qbittorrent.exe" }),
                     "Session: перенос программы в другой список во время работы -> перезапуск, она только в новом правиле");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Two();
+                int calls = 0;
+                using var started = new ManualResetEventSlim();
+                using var release = new ManualResetEventSlim();
+                using var ss = new Session(s, fb, NewCfg(), (ip, port) =>
+                {
+                    int c = Interlocked.Increment(ref calls);
+                    if (c != 2) return Up(ip, port); // 1 — первое подключение, 3+ — новое подключение
+                    started.Set(); // 2 — проверка перезапуска: ждёт и сообщает «не отвечает»
+                    release.Wait(2000);
+                    return DownProbe(ip, port);
+                }, Delay);
+                ss.ConnectAsync().Wait(2000);
+                s.Apps[1].Enabled = false;
+                ss.AppsChanged(); // перезапуск повис в проверке
+                started.Wait(2000);
+                ss.Disconnect();
+                ss.ConnectAsync().Wait(2000); // новое подключение, пока старая проверка ещё висит
+                release.Set();
+                Thread.Sleep(300);
+                Check(ss.State == ConnState.Connected && fb.Running && ss.Error == null,
+                    "Session: запоздавший перезапуск после Disconnect + Connect не трогает новое подключение");
             }
             {
                 var fb = new FakeSingBox();

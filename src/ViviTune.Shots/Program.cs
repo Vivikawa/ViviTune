@@ -39,6 +39,7 @@ for (int i = 0; i < 60; i++) // демо-история: волны и вспл�
 }
 Shot(NavPage.Home, "home-connected.png");
 // Две строки предупреждений, как их склеивает App; текст порта — копия константы Session (она не public)
+s.DetailText = ViewState.Detail(new TimeSpan(0, 42, 17), true, enabled, 0); // порт не отвечает: «мимо Podkop» программ нет, как в приложении
 s.WarningText = "Порт «Мимо Podkop» недоступен (таймаут подключения): программы из этого списка идут обычным путём.\n"
     + "UDP через этот прокси не работает: игры и голосовая связь могут не заработать.";
 Shot(NavPage.Home, "home-connected-warning.png");
@@ -60,6 +61,9 @@ Shot(NavPage.Apps, "apps-direct.png");
 s.DirectPort = null;
 Shot(NavPage.Apps, "apps-direct-noport.png"); // подсказка про порт
 s.DirectPort = 1819;
+s.BypassDown = true;
+Shot(NavPage.Apps, "apps-direct-down.png"); // подсказка, что порт не отвечает
+s.BypassDown = false;
 s.DirectTab = false;
 var appsPage = window.GetVisualDescendants().OfType<AppsPage>().Single();
 appsPage.OpenAddPanel().Wait(); // список и иконки готовит фоновый поток; Shot применит его Post

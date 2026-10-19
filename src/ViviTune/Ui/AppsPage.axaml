@@ -100,6 +100,8 @@
       <StackPanel Spacing="8">
         <TextBlock Classes="warning" FontSize="13" TextWrapping="Wrap" IsVisible="{Binding DirectHintVisible}"
                    Text="Укажите порт «Мимо Podkop» в настройках, иначе эти программы идут обычным путём." />
+        <TextBlock Classes="warning" FontSize="13" TextWrapping="Wrap" IsVisible="{Binding ExitDownHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                   Text="{Binding ExitDownHint}" />
         <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" IsVisible="{Binding !ShownApps.Count}"
                    Text="{Binding EmptyText}" />
         <ItemsControl ItemsSource="{Binding ShownApps}">
@@ -122,7 +124,7 @@
                   <!-- OneWay: Enabled меняет только App (по RequestSetAppEnabled) -->
                   <ToggleButton Grid.Column="2" Theme="{StaticResource Switch}" VerticalAlignment="Center"
                                 IsChecked="{Binding Enabled, Mode=OneWay}" Click="OnToggle"
-                                AutomationProperties.Name="Через прокси" />
+                                AutomationProperties.Name="Включено" />
                   <Button Grid.Column="3" Classes="flat" Content="✕" Margin="10,0,0,0" VerticalAlignment="Center"
                           Click="OnRemove" AutomationProperties.Name="Убрать из списка" />
                 </Grid>
