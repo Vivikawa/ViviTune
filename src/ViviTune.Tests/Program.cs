@@ -95,6 +95,10 @@ static class Program
             Check(!moved.Any(a => string.Equals(a.Path, first, StringComparison.OrdinalIgnoreCase)),
                 "Running: уже добавленный по имени файла (другая папка) тоже исключён");
         }
+        var grouped = ProcessCatalog.Group([(@"C:\a\Discord.exe", false), (@"c:\A\DISCORD.EXE", true), (@"C:\b\python.exe", false), (@"C:\b\python.exe", false)]).ToList();
+        Check(grouped.Count == 2 && grouped.Single(g => g.Path == @"C:\a\Discord.exe").Background == false
+            && grouped.Single(g => g.Path == @"C:\b\python.exe").Background,
+            "Group: одна строка на путь (без учёта регистра); фоновая — если ни у одного процесса нет окна");
         var png = ProcessCatalog.IconPng(System.IO.Path.Combine(win, "explorer.exe"));
         Check(png != null && png.Length > 4 && png[0] == 0x89 && png[1] == (byte)'P' && png[2] == (byte)'N' && png[3] == (byte)'G',
             "IconPng: explorer.exe -> PNG");

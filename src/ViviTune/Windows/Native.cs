@@ -4,10 +4,10 @@ namespace ViviTune.Windows
 {
     static class Native
     {
-        // Окно сообщения до старта Avalonia (второй экземпляр).
-        public static void Message(string text) => MessageBoxW(IntPtr.Zero, text, "ViviTune", 0);
+        // Второй экземпляр разрешает первому вывести окно на передний план (иначе Windows только мигнёт кнопкой).
+        public static void AllowAnyForeground() => AllowSetForegroundWindow(-1); // ASFW_ANY
 
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+        [DllImport("user32.dll")]
+        static extern bool AllowSetForegroundWindow(int processId);
     }
 }

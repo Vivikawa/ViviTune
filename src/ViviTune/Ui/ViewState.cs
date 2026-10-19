@@ -83,8 +83,8 @@ public sealed class ViewState : INotifyPropertyChanged
     public ObservableCollection<string> LogLines { get; } = new();
 
     // Источники для страницы Приложения; зовутся НЕ в UI-потоке. App даёт ProcessCatalog, Shots — демо.
-    // ListRunning(уже добавленные пути) — запущенные программы (путь, имя) без них; IconPng(путь) — PNG или null.
-    public Func<IReadOnlyCollection<string>, IEnumerable<(string Path, string Name)>> ListRunning { get; init; } = _ => [];
+    // ListRunning(уже добавленные пути) — запущенные программы (путь, имя, без окна ли) без них; IconPng(путь) — PNG или null.
+    public Func<IReadOnlyCollection<string>, IEnumerable<(string Path, string Name, bool Background)>> ListRunning { get; init; } = _ => [];
     public Func<string, byte[]?> IconPng { get; init; } = _ => null;
 
     readonly ConcurrentDictionary<string, Bitmap?> icons = new(StringComparer.OrdinalIgnoreCase);

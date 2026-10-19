@@ -16,6 +16,20 @@
                IsVisible="{Binding Icon, Converter={x:Static ObjectConverters.IsNotNull}}" />
       </Panel>
     </DataTemplate>
+    <!-- Строка панели «＋ Добавить» (запущенные и фоновые) -->
+    <DataTemplate x:Key="PickRow" x:DataType="ui:AppRow">
+      <Button Classes="pick" Click="OnPickRunning" ToolTip.Tip="{Binding Path}">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <ContentControl Width="20" Height="20" FontSize="11" VerticalAlignment="Center"
+                          Content="{Binding}" ContentTemplate="{StaticResource Badge}" />
+          <TextBlock Grid.Column="1" Margin="9,0" VerticalAlignment="Center" Text="{Binding Name}"
+                     TextTrimming="CharacterEllipsis" />
+          <!-- «＋»: значком, у глифа из запасного шрифта слишком тонкая линия -->
+          <PathIcon Grid.Column="2" Width="12" Height="12" Margin="0,0,4,0" VerticalAlignment="Center"
+                    Foreground="{StaticResource Accent1Brush}" Data="M10.5 3h3v7.5H21v3h-7.5V21h-3v-7.5H3v-3h7.5z" />
+        </Grid>
+      </Button>
+    </DataTemplate>
   </UserControl.Resources>
 
   <UserControl.Styles>
@@ -112,25 +126,20 @@
           <!-- «Запущены сейчас» прописными, как text-transform в макете -->
           <TextBlock Classes="lab" Text="ЗАПУЩЕНЫ СЕЙЧАС" />
           <ScrollViewer MaxHeight="252">
-            <ItemsControl Name="RunningList">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="ui:AppRow">
-                  <Button Classes="pick" Click="OnPickRunning" ToolTip.Tip="{Binding Path}">
-                    <Grid ColumnDefinitions="Auto,*,Auto">
-                      <ContentControl Width="20" Height="20" FontSize="11" VerticalAlignment="Center"
-                                      Content="{Binding}" ContentTemplate="{StaticResource Badge}" />
-                      <TextBlock Grid.Column="1" Margin="9,0" VerticalAlignment="Center" Text="{Binding Name}"
-                                 TextTrimming="CharacterEllipsis" />
-                      <!-- «＋»: значком, у глифа из запасного шрифта слишком тонкая линия -->
-                      <PathIcon Grid.Column="2" Width="12" Height="12" Margin="0,0,4,0" VerticalAlignment="Center"
-                                Foreground="{StaticResource Accent1Brush}" Data="M10.5 3h3v7.5H21v3h-7.5V21h-3v-7.5H3v-3h7.5z" />
-                    </Grid>
-                  </Button>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <StackPanel>
+              <ItemsControl Name="RunningList" ItemTemplate="{StaticResource PickRow}" />
+              <TextBlock Name="RunningHint" Classes="muted" Margin="6,4" />
+              <!-- Без окна: службы, помощники, консольные утилиты, свёрнутые в трей. Свёрнуто; при поиске раскрыто. -->
+              <Button Name="BgButton" Classes="pick">
+                <StackPanel Orientation="Horizontal" Spacing="9">
+                  <PathIcon Name="BgChevron" Width="20" Height="12" Foreground="{StaticResource MutedBrush}"
+                            Data="M8.6 16.6 13.2 12 8.6 7.4 10 6l6 6-6 6z" />
+                  <TextBlock Name="BgText" Classes="muted" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+              <ItemsControl Name="BgList" ItemTemplate="{StaticResource PickRow}" />
+            </StackPanel>
           </ScrollViewer>
-          <TextBlock Name="RunningHint" Classes="muted" Margin="6,4" />
 
           <TextBlock Classes="lab" Text="ДРУГОЕ" />
           <Button Name="PickFileButton" Classes="pick">

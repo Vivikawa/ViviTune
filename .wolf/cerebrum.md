@@ -30,6 +30,8 @@ budget_tokens: 2000
 - [2026-10-04] sing-box wrapper (TUN + process_name) chosen over DLL injection (anticheat) and own WinDivert engine (weeks of work).
 - [2026-10-19] Stay on sing-box 1.12.12 on purpose: 1.12.13-1.12.24 are only "fixes and improvements" with nothing for TUN/process_name/socks; 1.14.3 passes `sing-box check` on our config unchanged but is 82 MB (vs 37) and changes Windows TUN DNS defaults. Revisit only if a concrete bug shows up (try 1.12.24 first).
 - [2026-10-19] v2 exe: trimmed + compressed single file (105 -> 23 MB) over framework-dependent (needs runtime install) and UPX on sing-box.exe (antivirus false positives).
+- [2026-10-19] «＋ Добавить»: programs without a visible window (MainWindowHandle of none of their processes) go to a collapsed «Фоновые» section, not hidden: the user may still want to proxy Claude Code/Python. Tray-hidden apps land there too; user accepted that.
+- [2026-10-19] Close button hides to tray (connection stays); only tray «Выход» / OS shutdown really exit. Second launch signals the first (named event ViviTune.Show) instead of a message box.
 - [2026-10-18] proxy-dns over tcp (works without UDP on the proxy); sing-box log level warn + 500-line log cap.
 
 <!-- Significant technical decisions with rationale. Why X was chosen over Y. -->

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 
@@ -10,9 +11,9 @@ namespace ViviTune.Ui
     // Список приложений и панель «＋ Добавить». Изменения уходят в ViewState.Request*: App меняет Settings и строки.
     public partial class AppsPage : UserControl
     {
-        readonly ObservableCollection<AppRow> shown = new(); // «Запущены сейчас» после поиска
-        List<AppRow> running = new();
-        bool loading;
+        readonly ObservableCollection<AppRow> shown = new(), shownBg = new(); // «Запущены сейчас» и «Фоновые» после поиска
+        List<AppRow> running = new(), background = new(); // с окном и без
+        bool loading, bgOpen;
         int opening; // номер открытия панели: результаты прошлой загрузки не применяются
         readonly ClickGuard pickGuard = new(), removeGuard = new(); // список сдвигается: второй клик попал бы по соседней строке
 
@@ -20,11 +21,17 @@ namespace ViviTune.Ui
         {
             InitializeComponent();
             RunningList.ItemsSource = shown;
+            BgList.ItemsSource = shownBg;
+            BgButton.Click += (_, _) => { bgOpen = !bgOpen; Filter(); };
             AddPopup.PlacementTarget = ListArea;
             AddPopup.Opened += (_, _) => SearchBox.Focus();
             AddButton.Click += (_, _) => OpenAddPanel();
             PickFileButton.Click += (_, _) => PickFile();
-            SearchBox.TextChanged += (_, _) => Filter();
+            SearchBox.TextChanged += (_, _) =>
+            {
+                if (!string.IsNullOrWhiteSpace(SearchBox.Text)) bgOpen = true; // ищем и среди фоновых; свернуть можно и при поиске
+                Filter();
+            };
         }
 
         ViewState? State => DataContext as ViewState;
@@ -43,29 +50,33 @@ namespace ViviTune.Ui
             if (State is not { } s) return Task.CompletedTask;
             var n = ++opening;
             running = new();
+            background = new();
             loading = true;
+            bgOpen = false;
             SearchBox.Text = "";
             Filter();
             AddPopup.IsOpen = true;
             var added = s.Apps.Select(a => a.Path).ToList();
             return Task.Run(() =>
             {
-                List<AppRow> rows;
+                List<(AppRow Row, bool Background)> rows;
                 try
                 {
                     rows = s.ListRunning(added)
-                        .Select(a => new AppRow { Path = a.Path, FileName = Path.GetFileName(a.Path), Name = a.Name })
+                        .Select(a => (new AppRow { Path = a.Path, FileName = Path.GetFileName(a.Path), Name = a.Name }, a.Background))
+                        .OrderBy(r => r.Item2) // иконки сначала тем, что видно сразу; порядок по имени сохраняется
                         .ToList();
                 }
                 catch (Exception) { rows = new(); }
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (n != opening) return;
-                    running = rows;
+                    running = rows.Where(r => !r.Background).Select(r => r.Row).ToList();
+                    background = rows.Where(r => r.Background).Select(r => r.Row).ToList();
                     loading = false;
                     Filter();
                 });
-                foreach (var r in rows) // иконки по одной, по мере извлечения
+                foreach (var (r, _) in rows) // иконки по одной, по мере извлечения
                 {
                     if (n != Volatile.Read(ref opening)) return; // панель открыли заново: дальше грузит новая загрузка
                     var icon = s.LoadIcon(r.Path);
@@ -79,13 +90,24 @@ namespace ViviTune.Ui
         {
             var q = (SearchBox.Text ?? "").Trim();
             var apps = State?.Apps;
-            shown.Clear();
-            foreach (var r in running)
-                if (r.Name.Contains(q, StringComparison.OrdinalIgnoreCase) && apps?.Any(a => AppListOps.SameFile(a.Path, r.Path)) != true)
-                    shown.Add(r);
+            void Fill(ObservableCollection<AppRow> to, List<AppRow> from)
+            {
+                to.Clear();
+                foreach (var r in from)
+                    if (r.Name.Contains(q, StringComparison.OrdinalIgnoreCase) && apps?.Any(a => AppListOps.SameFile(a.Path, r.Path)) != true)
+                        to.Add(r);
+            }
+            Fill(shown, running);
+            Fill(shownBg, background);
+            BgButton.IsVisible = shownBg.Count > 0;
+            BgText.Text = $"Фоновые · {shownBg.Count}";
+            BgChevron.RenderTransform = bgOpen ? new RotateTransform(90) : null;
+            BgList.IsVisible = bgOpen;
             RunningHint.Text = loading ? "Загрузка…"
                 : shown.Count > 0 ? ""
-                : running.Count == 0 ? "Нет запущенных программ"
+                : running.Count + background.Count == 0 ? "Нет запущенных программ"
+                : q.Length == 0 ? "Нет программ с открытым окном"
+                : shownBg.Count > 0 ? ""
                 : "Ничего не найдено";
             RunningHint.IsVisible = RunningHint.Text.Length > 0;
         }
@@ -94,7 +116,7 @@ namespace ViviTune.Ui
         {
             if (sender is not Control { DataContext: AppRow r } || State is not { } s || !pickGuard.TryAccept(Environment.TickCount64)) return;
             s.RequestAddApp(r.Path);
-            Filter(); // добавленное уходит из «Запущены сейчас»; панель остаётся открытой для следующих
+            Filter(); // добавленное уходит из списка; панель остаётся открытой для следующих
         }
 
         void OnToggle(object? sender, RoutedEventArgs e)

@@ -53,8 +53,13 @@ Shot(NavPage.Apps, "apps.png");
 var appsPage = window.GetVisualDescendants().OfType<AppsPage>().Single();
 appsPage.OpenAddPanel().Wait(); // список и иконки готовит фоновый поток; Shot применит его Post
 Shot(NavPage.Apps, "apps-add.png");
+appsPage.FindControl<Button>("BgButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+Shot(NavPage.Apps, "apps-add-background.png"); // «Фоновые» раскрыты
+appsPage.OpenAddPanel().Wait(); // открытие заново — «Фоновые» снова свёрнуты
 appsPage.FindControl<TextBox>("SearchBox")!.Text = "st"; // поиск по имени без учёта регистра
 Shot(NavPage.Apps, "apps-add-search.png");
+appsPage.FindControl<TextBox>("SearchBox")!.Text = "pyth"; // нашлось только среди фоновых: они раскрываются
+Shot(NavPage.Apps, "apps-add-search-background.png");
 Shot(NavPage.Log, "log.png"); // уход со страницы закрывает панель
 Shot(NavPage.Settings, "settings.png");
 s.Apps.Clear();
@@ -79,15 +84,18 @@ void Shot(NavPage page, string file)
 static ViewState Demo()
 {
     // «Запущены сейчас»: Discord (в другом регистре) уже добавлен и не должен попасть в панель;
-    // у Проводника настоящая иконка, у остальных (файлов нет) — плашки с буквой, как в макете.
-    var running = new (string Path, string Name)[]
+    // у Проводника настоящая иконка, у остальных (файлов нет) — плашки с буквой, как в макете. Без окна — в «Фоновые».
+    var running = new (string Path, string Name, bool Background)[]
     {
-        (@"C:\USERS\ME\APPDATA\LOCAL\DISCORD\APP-1.0.9200\DISCORD.EXE", "Discord"),
-        (@"C:\Program Files\obs-studio\bin\64bit\obs64.exe", "OBS Studio"),
-        (@"C:\Users\me\AppData\Roaming\Spotify\Spotify.exe", "Spotify"),
-        (@"C:\Program Files (x86)\Steam\steam.exe", "Steam"),
-        (@"C:\Users\me\AppData\Roaming\Telegram Desktop\Telegram.exe", "Telegram"),
-        (Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "Проводник")
+        (@"C:\USERS\ME\APPDATA\LOCAL\DISCORD\APP-1.0.9200\DISCORD.EXE", "Discord", false),
+        (@"C:\Program Files\obs-studio\bin\64bit\obs64.exe", "OBS Studio", false),
+        (@"C:\Users\me\AppData\Roaming\Spotify\Spotify.exe", "Spotify", false),
+        (@"C:\Program Files (x86)\Steam\steam.exe", "Steam", false),
+        (@"C:\Users\me\AppData\Roaming\Telegram Desktop\Telegram.exe", "Telegram", false),
+        (Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "Проводник", false),
+        (@"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\msedgewebview2.exe", "Microsoft Edge WebView2", true),
+        (@"C:\Users\me\AppData\Local\Programs\Python\Python313\python.exe", "Python", true),
+        (@"C:\Program Files\PowerShell\7\pwsh.exe", "PowerShell 7", true)
     };
     var s = new ViewState
     {

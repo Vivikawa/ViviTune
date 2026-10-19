@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
@@ -9,6 +10,7 @@ namespace ViviTune.Ui
     public class App : Application
     {
         const string NoUdpWarning = "UDP через этот прокси не работает: игры и голосовая связь могут не заработать.";
+        public const string ShowSignal = "ViviTune.Show"; // второй экземпляр просит показать окно (Program)
 
         public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -32,7 +34,7 @@ namespace ViviTune.Ui
                 Ip = settings.Ip,
                 Port = settings.Port,
                 SettingsError = Settings.ValidateProxy(settings.Ip, settings.Port),
-                ListRunning = exclude => ProcessCatalog.Running(exclude).Select(a => (a.Path, a.Name)),
+                ListRunning = exclude => ProcessCatalog.Running(exclude).Select(a => (a.Path, a.Name, a.Background)),
                 IconPng = ProcessCatalog.IconPng
             };
 
@@ -76,6 +78,11 @@ namespace ViviTune.Ui
             state.RemoveAppRequested += path => ChangeApps(apps => AppListOps.Remove(apps, path));
             state.SetAppEnabledRequested += (path, on) => ChangeApps(apps => AppListOps.SetEnabled(apps, path, on));
 
+            // Трей: пункт подключения и подсказка следуют за состоянием (Sync), остальное — после окна.
+            var toggleItem = new NativeMenuItem("Подключить");
+            toggleItem.Click += (_, _) => state.RequestToggle();
+            var tray = new TrayIcon { ToolTipText = "ViviTune: " + state.StatusText };
+
             // Строка «время · UDP · приложения» под статусом: раз в секунду, только при Connected.
             var detailTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             void UpdateDetail()
@@ -94,6 +101,9 @@ namespace ViviTune.Ui
                 state.WarningText = session.UdpOk == false ? NoUdpWarning : null;
                 UpdateDetail();
                 detailTimer.IsEnabled = state.State == ConnState.Connected;
+                toggleItem.Header = state.State == ConnState.Disconnected ? "Подключить" : "Отключить";
+                toggleItem.IsEnabled = !state.IsBusy; // как кнопка на Главной
+                tray.ToolTipText = "ViviTune: " + state.StatusText;
             }
 
             // События Session приходят из любых потоков (Speed — под её блокировкой): только Post, никогда Invoke.
@@ -123,6 +133,32 @@ namespace ViviTune.Ui
             };
 
             var window = new MainWindow(state);
+
+            // Крестик и Alt+F4 прячут окно в трей, подключение остаётся. По-настоящему закрывают «Выход»
+            // (Close из кода — IsProgrammatic) и выключение Windows (другая CloseReason).
+            window.Closing += (_, e) =>
+            {
+                if (e.CloseReason != WindowCloseReason.WindowClosing || e.IsProgrammatic) return;
+                e.Cancel = true;
+                window.Hide();
+            };
+            void ShowWindow()
+            {
+                window.Show();
+                if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+                window.Activate();
+            }
+            var openItem = new NativeMenuItem("Открыть");
+            openItem.Click += (_, _) => ShowWindow();
+            var quitItem = new NativeMenuItem("Выход");
+            quitItem.Click += (_, _) => window.Close();
+            tray.Icon = window.Icon;
+            tray.Menu = new NativeMenu { openItem, toggleItem, new NativeMenuItemSeparator(), quitItem };
+            tray.Clicked += (_, _) => ShowWindow();
+            TrayIcon.SetIcons(Current!, new TrayIcons { tray });
+            var showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, ShowSignal);
+            ThreadPool.RegisterWaitForSingleObject(showSignal, (_, _) => Dispatcher.UIThread.Post(ShowWindow), null, -1, false);
+
             window.Closed += (_, _) =>
             {
                 detailTimer.Stop();
