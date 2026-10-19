@@ -32,8 +32,11 @@ s.State = ConnState.Connected;
 s.DetailText = ViewState.Detail(new TimeSpan(0, 42, 17), true, enabled);
 const double MiB = 1024 * 1024;
 for (int i = 0; i < 60; i++) // демо-история: волны и всплеск отдачи; последнее значение как в макете (1.2 и 8.4 МБ/с)
-    s.PushSpeed(new Speed(1.2 * MiB * (1 + 0.45 * Math.Sin((i - 59) / 4.5)) + (i == 40 ? 1.6 * MiB : 0),
-                          8.4 * MiB * (1 + 0.5 * Math.Sin((i - 59) / 6.0))));
+{
+    double up = 1.2 * MiB * (1 + 0.45 * Math.Sin((i - 59) / 4.5)) + (i == 40 ? 1.6 * MiB : 0);
+    double down = 8.4 * MiB * (1 + 0.5 * Math.Sin((i - 59) / 6.0));
+    s.PushSpeed(new Speed(up, down, (long)up, (long)down));
+}
 Shot(NavPage.Home, "home-connected.png");
 s.DetailText = ViewState.Detail(new TimeSpan(0, 3, 5), false, enabled);
 s.WarningText = "UDP через этот прокси не работает: игры и голосовая связь могут не заработать.";

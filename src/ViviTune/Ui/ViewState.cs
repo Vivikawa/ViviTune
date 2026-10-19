@@ -17,6 +17,7 @@ public sealed class ViewState : INotifyPropertyChanged
     string? errorText, warningText, settingsError;
     string detailText = "", ip = "";
     double upBps, downBps;
+    long upTotal, downTotal;
     int port;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -36,6 +37,11 @@ public sealed class ViewState : INotifyPropertyChanged
             {
                 UpHistory.Clear();
                 DownHistory.Clear();
+            }
+            if (value == ConnState.Checking) // новое подключение — итог с нуля; перезапуски (Restarting) его не сбрасывают
+            {
+                upTotal = downTotal = 0;
+                Notify(nameof(UpTotalText), nameof(DownTotalText));
             }
             Notify(nameof(StatusText), nameof(SettingsEditable), nameof(IsBusy), nameof(IsConnected));
         }
@@ -68,6 +74,8 @@ public sealed class ViewState : INotifyPropertyChanged
     public double DownBps { get => downBps; private set { if (Set(ref downBps, value)) Notify(nameof(DownText)); } }
     public string UpText => Format.Speed(upBps);
     public string DownText => Format.Speed(downBps);
+    public string UpTotalText => "всего " + Format.Bytes(upTotal);
+    public string DownTotalText => "всего " + Format.Bytes(downTotal);
     public ObservableCollection<double> UpHistory { get; } = new();
     public ObservableCollection<double> DownHistory { get; } = new();
 
@@ -101,6 +109,10 @@ public sealed class ViewState : INotifyPropertyChanged
         DownBps = s.DownBps;
         Push(UpHistory, s.UpBps, HistoryMax);
         Push(DownHistory, s.DownBps, HistoryMax);
+        if (s.UpBytes == 0 && s.DownBytes == 0) return;
+        upTotal += s.UpBytes;
+        downTotal += s.DownBytes;
+        Notify(nameof(UpTotalText), nameof(DownTotalText));
     }
 
     public void AddLog(string line) => Push(LogLines, line, LogMax);
@@ -136,11 +148,11 @@ public sealed class ViewState : INotifyPropertyChanged
         return added;
     }
 
-    // Строка под статусом при подключении: «00:42:17 · UDP ✓ · 2 прилож.»; UDP неизвестен — без него.
+    // Строка под статусом при подключении: «00:42:17 · TCP + UDP · 2 прилож.»; UDP неизвестен — без протоколов.
     public static string Detail(TimeSpan up, bool? udp, int apps)
     {
         var time = Format.Uptime(up < TimeSpan.Zero ? TimeSpan.Zero : up);
-        var u = udp switch { true => " · UDP ✓", false => " · UDP ✗", null => "" };
+        var u = udp switch { true => " · TCP + UDP", false => " · только TCP", null => "" };
         return $"{time}{u} · {apps} прилож.";
     }
 

@@ -181,10 +181,10 @@ static class Program
         v.RequestSetProxy("10.0.0.2", 1080);
         Check(proxyEvents == 1, "ViewState: RequestSetProxy без изменений не поднимает событие (settings.json не пишется при старте)");
 
-        Check(ViewState.Detail(new TimeSpan(0, 42, 17), true, 2) == "00:42:17 · UDP ✓ · 2 прилож.", "ViewState.Detail: время, UDP ✓, приложения");
-        Check(ViewState.Detail(TimeSpan.FromSeconds(5), false, 1) == "00:00:05 · UDP ✗ · 1 прилож.", "ViewState.Detail: UDP ✗");
-        Check(ViewState.Detail(TimeSpan.FromSeconds(5), null, 1) == "00:00:05 · 1 прилож.", "ViewState.Detail: UDP неизвестен -> без UDP");
-        Check(ViewState.Detail(TimeSpan.FromSeconds(-3), true, 1) == "00:00:00 · UDP ✓ · 1 прилож.", "ViewState.Detail: отрицательное время -> 00:00:00");
+        Check(ViewState.Detail(new TimeSpan(0, 42, 17), true, 2) == "00:42:17 · TCP + UDP · 2 прилож.", "ViewState.Detail: время, TCP + UDP, приложения");
+        Check(ViewState.Detail(TimeSpan.FromSeconds(5), false, 1) == "00:00:05 · только TCP · 1 прилож.", "ViewState.Detail: без UDP -> только TCP");
+        Check(ViewState.Detail(TimeSpan.FromSeconds(5), null, 1) == "00:00:05 · 1 прилож.", "ViewState.Detail: UDP неизвестен -> без протоколов");
+        Check(ViewState.Detail(TimeSpan.FromSeconds(-3), true, 1) == "00:00:00 · TCP + UDP · 1 прилож.", "ViewState.Detail: отрицательное время -> 00:00:00");
 
         var b = new ViewState();
         bool idle = !b.IsBusy && !b.IsConnected;
@@ -205,6 +205,19 @@ static class Program
         b.State = ConnState.Disconnected;
         Check(kept && b.UpHistory.Count == 0 && b.DownHistory.Count == 0 && changed.Contains(nameof(ViewState.IsBusy)) && changed.Contains(nameof(ViewState.IsConnected)),
             "ViewState: при отключении история скорости очищается (без подключения — нули)");
+
+        var t = new ViewState();
+        t.State = ConnState.Checking;
+        t.State = ConnState.Connected;
+        t.PushSpeed(new Speed(0, 0, 1024, 2048));
+        t.State = ConnState.Restarting; // перезапуск из-за смены приложений: счёт продолжается
+        t.State = ConnState.Connected;
+        t.PushSpeed(new Speed(0, 0, 512, 1024 * 1024));
+        t.State = ConnState.Disconnected;
+        bool totals = t.UpTotalText == "всего 1.5 КБ" && t.DownTotalText == "всего 1.0 МБ"; // после отключения итог виден
+        t.State = ConnState.Checking; // новое подключение — с нуля
+        Check(totals && t.UpTotalText == "всего 0 Б" && t.DownTotalText == "всего 0 Б",
+            "ViewState: итог трафика копится через перезапуски, виден после отключения, сбрасывается при подключении");
 
         SparklineTests();
     }
@@ -357,12 +370,12 @@ static class Program
 
         var s1 = TrafficMath.Delta(Prev(new ConnSample("a", 100, 1000, true)),
             new[] { new ConnSample("a", 300, 5000, true), new ConnSample("b", 50, 50, false) }, 1);
-        Check(s1 == new Speed(200, 4000), "Delta: прирост только proxy");
+        Check(s1 == new Speed(200, 4000, 200, 4000), "Delta: прирост только proxy (скорость и байты)");
         var s2 = TrafficMath.Delta(Prev(), new[] { new ConnSample("c", 10, 20, true) }, 2);
-        Check(s2 == new Speed(5, 10), "Delta: новое соединение от нуля");
+        Check(s2 == new Speed(5, 10, 10, 20), "Delta: новое соединение от нуля, байты не делятся на секунды");
         var s3 = TrafficMath.Delta(Prev(new ConnSample("a", 500, 500, true)), new[] { new ConnSample("a", 100, 100, true) }, 1);
         Check(s3 == new Speed(0, 0), "Delta: счётчик уменьшился");
-        Check(TrafficMath.Delta(Prev(), new[] { new ConnSample("c", 10, 20, true) }, 0) == new Speed(0, 0), "Delta: seconds<=0");
+        Check(TrafficMath.Delta(Prev(), new[] { new ConnSample("c", 10, 20, true) }, 0) == new Speed(0, 0, 10, 20), "Delta: seconds<=0 -> скорость 0, байты не теряются");
 
         Check(Format.Speed(0) == "0 Б/с" && Format.Speed(1536) == "1.5 КБ/с" && Format.Speed(8808038) == "8.4 МБ/с", "Format.Speed");
         var old = System.Globalization.CultureInfo.CurrentCulture;
@@ -370,6 +383,8 @@ static class Program
         Check(Format.Speed(1536) == "1.5 КБ/с", "Format.Speed: не зависит от культуры");
         System.Globalization.CultureInfo.CurrentCulture = old;
         Check(Format.Uptime(new TimeSpan(0, 42, 17)) == "00:42:17" && Format.Uptime(TimeSpan.FromHours(100)) == "100:00:00", "Format.Uptime");
+        Check(Format.Bytes(0) == "0 Б" && Format.Bytes(512) == "512 Б" && Format.Bytes(1536) == "1.5 КБ" && Format.Bytes(8808038) == "8.4 МБ"
+            && Format.Bytes(1288490189) == "1.20 ГБ", "Format.Bytes");
 
         // закрытый порт
         var l = new TcpListener(IPAddress.Loopback, 0);

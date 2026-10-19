@@ -6,7 +6,8 @@ namespace ViviTune;
 
 public readonly record struct ConnSample(string Id, long Upload, long Download, bool ViaProxy);
 
-public readonly record struct Speed(double UpBps, double DownBps);
+// UpBytes/DownBytes — байты через прокси за интервал опроса, для итога трафика
+public readonly record struct Speed(double UpBps, double DownBps, long UpBytes = 0, long DownBytes = 0);
 
 public static class TrafficMath
 {
@@ -38,8 +39,7 @@ public static class TrafficMath
 
     public static Speed Delta(IReadOnlyDictionary<string, ConnSample> prev, IReadOnlyList<ConnSample> now, double seconds)
     {
-        if (seconds <= 0) return new Speed(0, 0);
-        double up = 0, down = 0;
+        long up = 0, down = 0;
         foreach (var c in now)
         {
             if (!c.ViaProxy) continue;
@@ -48,7 +48,8 @@ public static class TrafficMath
             up += Math.Max(0, c.Upload - pu);
             down += Math.Max(0, c.Download - pd);
         }
-        return new Speed(up / seconds, down / seconds);
+        // байты не теряем и при seconds<=0: они идут в итог трафика
+        return seconds > 0 ? new Speed(up / seconds, down / seconds, up, down) : new Speed(0, 0, up, down);
     }
 }
 

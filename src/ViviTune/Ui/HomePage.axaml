@@ -114,6 +114,7 @@
         <StackPanel>
           <TextBlock Classes="muted" Text="↑ Отдача через прокси" />
           <TextBlock Classes="speed" Foreground="{StaticResource Accent2Brush}" Text="{Binding UpText}" />
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding UpTotalText}" />
           <ui:Sparkline Height="44" Margin="0,10,0,0" Stroke="{StaticResource Accent2Brush}" Values="{Binding UpHistory}" />
         </StackPanel>
       </Border>
@@ -121,6 +122,7 @@
         <StackPanel>
           <TextBlock Classes="muted" Text="↓ Загрузка через прокси" />
           <TextBlock Classes="speed" Foreground="{StaticResource Accent1Brush}" Text="{Binding DownText}" />
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding DownTotalText}" />
           <ui:Sparkline Height="44" Margin="0,10,0,0" Stroke="{StaticResource Accent1Brush}" Values="{Binding DownHistory}" />
         </StackPanel>
       </Border>
