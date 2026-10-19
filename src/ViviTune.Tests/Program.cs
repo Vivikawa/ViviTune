@@ -855,6 +855,46 @@ static class Program
                     && Arr(AppRule(rules, "bypass")!["process_name"]).Select(x => Str(x)).OrderBy(x => x).SequenceEqual(new[] { "chrome.exe", "qbittorrent.exe" }),
                     "Session: перенос программы в другой список во время работы -> перезапуск, она только в новом правиле");
             }
+            {
+                var fb = new FakeSingBox();
+                var s = Two();
+                var up = true;
+                using var ss = new Session(s, fb, NewCfg(), (ip, port) => Volatile.Read(ref up) ? Up(ip, port) : DownProbe(ip, port), Delay);
+                ss.ConnectAsync().Wait(2000);
+                Volatile.Write(ref up, false);
+                s.Apps[1].Enabled = false;
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                Check(ss.State == ConnState.Disconnected && ss.Error == "Прокси недоступен: таймаут подключения" && !fb.Running && fb.Starts == 1
+                    && ss.Warnings.Count == 0, "Session: при перезапуске ни один выход не отвечает -> sing-box остановлен, ошибка");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Both();
+                s.DirectApps.Clear();
+                var cfg = NewCfg();
+                var probed = new List<int>();
+                using var started = new ManualResetEventSlim();
+                using var release = new ManualResetEventSlim();
+                using var ss = new Session(s, fb, cfg, (ip, port) =>
+                {
+                    lock (probed) probed.Add(port);
+                    started.Set();
+                    release.Wait(2000);
+                    return Up(ip, port);
+                }, Delay);
+                var t = ss.ConnectAsync();
+                started.Wait(2000); // проверка уже идёт по снимку без «Мимо Podkop»
+                s.DirectApps = A(@"C:\q\qbittorrent.exe"); // список «Мимо Podkop» появился во время проверки
+                ss.AppsChanged();
+                release.Set();
+                t.Wait(2000);
+                var rules = Arr(Obj(JsonNode.Parse(File.ReadAllText(cfg))!["route"])["rules"]);
+                bool bypassProbed;
+                lock (probed) bypassProbed = probed.Contains(1090);
+                Check(ss.State == ConnState.Connected && fb.Starts == 1 && bypassProbed && ss.Live == new Exits(true, true) && AppRule(rules, "bypass") != null,
+                    "Session: во время проверки появился список «Мимо Podkop» -> его порт проверяется до запуска");
+            }
             using (var rn = new ViviTune.Windows.Runner(Path.Combine(root, "нет", "sing-box.exe")))
             {
                 ISingBox sb = rn;
