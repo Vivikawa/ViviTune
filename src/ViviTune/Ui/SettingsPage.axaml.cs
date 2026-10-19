@@ -28,7 +28,7 @@ namespace ViviTune.Ui
             if (DataContext is not ViewState s) return;
             // нечисловой порт — 0: App покажет «Порт должен быть от 1 до 65535»
             int.TryParse(PortBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port);
-            s.RequestSetProxy((IpBox.Text ?? "").Trim(), port);
+            s.RequestSetProxy((IpBox.Text ?? "").Trim(), port, s.DirectPort);
         }
     }
 }

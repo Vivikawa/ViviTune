@@ -19,13 +19,15 @@ public sealed class ViewState : INotifyPropertyChanged
     double upBps, downBps;
     long upTotal, downTotal;
     int port;
+    int? directPort;
+    bool directTab;
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event Action? ToggleRequested;
-    public event Action<string>? AddAppRequested;
+    public event Action<string, bool>? AddAppRequested; // путь, в «Мимо Podkop» ли
     public event Action<string>? RemoveAppRequested;
     public event Action<string, bool>? SetAppEnabledRequested;
-    public event Action<string, int>? SetProxyRequested;
+    public event Action<string, int, int?>? SetProxyRequested;
 
     public ConnState State
     {
@@ -80,6 +82,23 @@ public sealed class ViewState : INotifyPropertyChanged
     public ObservableCollection<double> DownHistory { get; } = new();
 
     public ObservableCollection<AppRow> Apps { get; } = new();
+    public ObservableCollection<AppRow> DirectApps { get; } = new();
+
+    // Открыта вкладка «Мимо Podkop» (иначе «Через прокси»)
+    public bool DirectTab
+    {
+        get => directTab;
+        set { if (Set(ref directTab, value)) Notify(nameof(ShownApps), nameof(EmptyText), nameof(DirectHintVisible)); }
+    }
+    public ObservableCollection<AppRow> ShownApps => directTab ? DirectApps : Apps;
+    public string ProxyTabText => $"Через прокси · {Apps.Count(a => a.Enabled)}";
+    public string DirectTabText => $"Мимо Podkop · {DirectApps.Count(a => a.Enabled)}";
+    public string EmptyText => directTab
+        ? "Добавьте приложение, трафик которого пойдёт мимо Podkop"
+        : "Добавьте приложение, трафик которого пойдёт через прокси";
+    public int? DirectPort { get => directPort; set { if (Set(ref directPort, value)) Notify(nameof(DirectHintVisible)); } }
+    // Вкладка «Мимо Podkop» без порта: подсказать, где его задать
+    public bool DirectHintVisible => directTab && directPort == null;
     public ObservableCollection<string> LogLines { get; } = new();
 
     // Источники для страницы Приложения; зовутся НЕ в UI-потоке. App даёт ProcessCatalog, Shots — демо.
@@ -117,21 +136,29 @@ public sealed class ViewState : INotifyPropertyChanged
 
     public void AddLog(string line) => Push(LogLines, line, LogMax);
 
-    // Строки Apps по списку из Settings (порядок тот же): лишние убрать, недостающие вставить, Enabled обновить.
-    // Новые строки — с именем файла и плашкой; их App возвращает, чтобы догрузить описание и иконку.
-    public List<AppRow> SyncApps(List<AppEntry> apps)
+    // Строки Apps и DirectApps по спискам из Settings (порядок тот же): лишние убрать, недостающие вставить, Enabled обновить.
+    // Новые строки обоих списков — с именем файла и плашкой; их App возвращает, чтобы догрузить описание и иконку.
+    public List<AppRow> SyncApps(List<AppEntry> apps, List<AppEntry> directApps)
     {
-        for (int i = Apps.Count - 1; i >= 0; i--)
+        var added = SyncRows(Apps, apps);
+        added.AddRange(SyncRows(DirectApps, directApps));
+        Notify(nameof(ProxyTabText), nameof(DirectTabText));
+        return added;
+    }
+
+    static List<AppRow> SyncRows(ObservableCollection<AppRow> rows, List<AppEntry> apps)
+    {
+        for (int i = rows.Count - 1; i >= 0; i--)
         {
-            var path = Apps[i].Path;
-            if (!apps.Exists(a => AppListOps.Same(a.Path, path))) Apps.RemoveAt(i);
+            var path = rows[i].Path;
+            if (!apps.Exists(a => AppListOps.Same(a.Path, path))) rows.RemoveAt(i);
         }
         var added = new List<AppRow>();
         for (int i = 0; i < apps.Count; i++)
         {
-            if (i < Apps.Count && AppListOps.Same(Apps[i].Path, apps[i].Path))
+            if (i < rows.Count && AppListOps.Same(rows[i].Path, apps[i].Path))
             {
-                Apps[i].Enabled = apps[i].Enabled;
+                rows[i].Enabled = apps[i].Enabled;
                 continue;
             }
             var row = new AppRow
@@ -141,31 +168,34 @@ public sealed class ViewState : INotifyPropertyChanged
                 Name = System.IO.Path.GetFileNameWithoutExtension(apps[i].Path),
                 Enabled = apps[i].Enabled
             };
-            Apps.Insert(i, row);
+            rows.Insert(i, row);
             added.Add(row);
         }
-        while (Apps.Count > apps.Count) Apps.RemoveAt(Apps.Count - 1);
+        while (rows.Count > apps.Count) rows.RemoveAt(rows.Count - 1);
         return added;
     }
 
-    // Строка под статусом при подключении: «00:42:17 · TCP + UDP · 2 прилож.»; UDP неизвестен — без протоколов.
-    public static string Detail(TimeSpan up, bool? udp, int apps)
+    // Строка под статусом при подключении: «00:42:17 · TCP + UDP · 2 через прокси · 1 мимо Podkop»;
+    // UDP неизвестен — без протоколов, нулевая часть не пишется.
+    public static string Detail(TimeSpan up, bool? udp, int proxyApps, int bypassApps)
     {
         var time = Format.Uptime(up < TimeSpan.Zero ? TimeSpan.Zero : up);
         var u = udp switch { true => " · TCP + UDP", false => " · только TCP", null => "" };
-        return $"{time}{u} · {apps} прилож.";
+        var p = proxyApps > 0 ? $" · {proxyApps} через прокси" : "";
+        var d = bypassApps > 0 ? $" · {bypassApps} мимо Podkop" : "";
+        return time + u + p + d;
     }
 
     public void RequestToggle() => ToggleRequested?.Invoke();
-    public void RequestAddApp(string path) => AddAppRequested?.Invoke(path);
+    public void RequestAddApp(string path) => AddAppRequested?.Invoke(path, directTab);
     public void RequestRemoveApp(string path) => RemoveAppRequested?.Invoke(path);
     public void RequestSetAppEnabled(string path, bool enabled) => SetAppEnabledRequested?.Invoke(path, enabled);
-    // Ip/Port здесь — то, что сейчас в Settings (App держит их вместе). Без изменений события нет:
+    // Ip/Port/DirectPort здесь — то, что сейчас в Settings (App держит их вместе). Без изменений события нет:
     // иначе заполнение полей страницы при старте (TextChanged приходит позже, асинхронно) перезаписывало бы settings.json.
-    public void RequestSetProxy(string ip, int port)
+    public void RequestSetProxy(string ip, int port, int? directPort)
     {
-        if (ip == Ip && port == Port) return;
-        SetProxyRequested?.Invoke(ip, port);
+        if (ip == Ip && port == Port && directPort == DirectPort) return;
+        SetProxyRequested?.Invoke(ip, port, directPort);
     }
 
     static void Push<T>(ObservableCollection<T> list, T value, int max)

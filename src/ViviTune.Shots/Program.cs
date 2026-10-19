@@ -29,7 +29,7 @@ Shot(NavPage.Home, "home-disconnected.png");
 s.State = ConnState.Checking;
 Shot(NavPage.Home, "home-checking.png");
 s.State = ConnState.Connected;
-s.DetailText = ViewState.Detail(new TimeSpan(0, 42, 17), true, enabled);
+s.DetailText = ViewState.Detail(new TimeSpan(0, 42, 17), true, enabled, 0);
 const double MiB = 1024 * 1024;
 for (int i = 0; i < 60; i++) // демо-история: волны и всплеск отдачи; последнее значение как в макете (1.2 и 8.4 МБ/с)
 {
@@ -38,7 +38,7 @@ for (int i = 0; i < 60; i++) // демо-история: волны и вспл�
     s.PushSpeed(new Speed(up, down, (long)up, (long)down));
 }
 Shot(NavPage.Home, "home-connected.png");
-s.DetailText = ViewState.Detail(new TimeSpan(0, 3, 5), false, enabled);
+s.DetailText = ViewState.Detail(new TimeSpan(0, 3, 5), false, enabled, 0);
 s.WarningText = "UDP через этот прокси не работает: игры и голосовая связь могут не заработать.";
 Shot(NavPage.Home, "home-connected-noudp.png");
 s.State = ConnState.Disconnected; // как Session: ошибка, затем нулевая скорость

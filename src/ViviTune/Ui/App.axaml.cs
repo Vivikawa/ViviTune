@@ -9,7 +9,6 @@ namespace ViviTune.Ui
 {
     public class App : Application
     {
-        const string NoUdpWarning = "UDP через этот прокси не работает: игры и голосовая связь могут не заработать.";
         public const string ShowSignal = "ViviTune.Show"; // второй экземпляр просит показать окно (Program)
 
         public override void Initialize() => AvaloniaXamlLoader.Load(this);
@@ -33,16 +32,17 @@ namespace ViviTune.Ui
             {
                 Ip = settings.Ip,
                 Port = settings.Port,
-                SettingsError = Settings.ValidateProxy(settings.Ip, settings.Port),
+                DirectPort = settings.DirectPort,
+                SettingsError = Settings.ValidateProxy(settings.Ip, settings.Port) ?? Settings.ValidateDirectPort(settings.DirectPort, settings.Port),
                 ListRunning = exclude => ProcessCatalog.Running(exclude).Select(a => (a.Path, a.Name, a.Background)),
                 IconPng = ProcessCatalog.IconPng
             };
 
             // Новые строки (с именем файла и плашкой) получают описание программы и иконку, не в UI-потоке.
             // Файла нет — так и остаётся (имя из имени файла, плашка с буквой).
-            void SyncRows(List<AppEntry> apps)
+            void SyncRows(List<AppEntry> apps, List<AppEntry> directApps)
             {
-                var rows = state.SyncApps(apps);
+                var rows = state.SyncApps(apps, directApps);
                 if (rows.Count == 0) return;
                 Task.Run(() =>
                 {
@@ -54,29 +54,32 @@ namespace ViviTune.Ui
                     }
                 });
             }
-            SyncRows(settings.Apps);
+            SyncRows(settings.Apps, settings.DirectApps);
 
-            // Settings.Apps не меняется на месте: Session снимает копию настроек в своих потоках.
+            // Settings.Apps и DirectApps не меняются на месте: Session снимает копию настроек в своих потоках.
             // Новый список → Save → строки → Session.AppsChanged. Вызовы AppsChanged идут по очереди:
             // каждый читает текущий Settings.Apps, так что последний вызов видит последнее состояние.
             var appsChain = Task.CompletedTask;
-            void ChangeApps(Func<List<AppEntry>, bool> change)
+            void ChangeApps(Func<List<AppEntry>, List<AppEntry>, bool> change)
             {
                 var apps = AppListOps.Copy(settings.Apps);
-                if (!change(apps)) return;
+                var direct = AppListOps.Copy(settings.DirectApps);
+                if (!change(apps, direct)) return;
                 settings.Apps = apps;
+                settings.DirectApps = direct;
                 try { settings.Save(settingsPath); }
                 catch (Exception) { } // папка недоступна для записи: работаем без сохранения
-                SyncRows(apps);
+                SyncRows(apps, direct);
                 appsChain = appsChain.ContinueWith(_ =>
                 {
                     try { session.AppsChanged(); } // может отключать и ждать перезапуска: не в UI-потоке
                     catch (Exception e) { Dispatcher.UIThread.Post(() => state.AddLog("Ошибка: " + e.Message)); }
                 }, TaskScheduler.Default);
             }
-            state.AddAppRequested += path => ChangeApps(apps => AppListOps.Add(apps, path));
-            state.RemoveAppRequested += path => ChangeApps(apps => AppListOps.Remove(apps, path));
-            state.SetAppEnabledRequested += (path, on) => ChangeApps(apps => AppListOps.SetEnabled(apps, path, on));
+            state.AddAppRequested += (path, toDirect) => ChangeApps((p, d) => toDirect ? AppListOps.Move(d, p, path) : AppListOps.Move(p, d, path));
+            // Путь может быть в любом из списков: без короткого замыкания (| вместо ||), чтобы затронуть оба
+            state.RemoveAppRequested += path => ChangeApps((p, d) => AppListOps.Remove(p, path) | AppListOps.Remove(d, path));
+            state.SetAppEnabledRequested += (path, on) => ChangeApps((p, d) => AppListOps.SetEnabled(p, path, on) | AppListOps.SetEnabled(d, path, on));
 
             // Трей: пункт подключения и подсказка следуют за состоянием (Sync), остальное — после окна.
             var toggleItem = new NativeMenuItem("Подключить");
@@ -88,8 +91,10 @@ namespace ViviTune.Ui
             void UpdateDetail()
             {
                 var since = session.ConnectedSince;
+                var live = session.Live;
                 state.DetailText = state.State == ConnState.Connected && since != null
-                    ? ViewState.Detail(DateTime.Now - since.Value, session.UdpOk, state.Apps.Count(a => a.Enabled))
+                    ? ViewState.Detail(DateTime.Now - since.Value, session.UdpOk,
+                        live.Proxy ? state.Apps.Count(a => a.Enabled) : 0, live.Bypass ? state.DirectApps.Count(a => a.Enabled) : 0)
                     : "";
             }
             detailTimer.Tick += (_, _) => UpdateDetail();
@@ -98,7 +103,7 @@ namespace ViviTune.Ui
             {
                 state.State = session.State;
                 state.ErrorText = session.Error;
-                state.WarningText = session.UdpOk == false ? NoUdpWarning : null;
+                state.WarningText = session.Warnings.Count > 0 ? string.Join("\n", session.Warnings) : null;
                 UpdateDetail();
                 detailTimer.IsEnabled = state.State == ConnState.Connected;
                 toggleItem.Header = state.State == ConnState.Disconnected ? "Подключить" : "Отключить";
@@ -120,14 +125,16 @@ namespace ViviTune.Ui
                 }
                 catch (Exception e) { state.AddLog("Ошибка: " + e.Message); }
             };
-            state.SetProxyRequested += (ip, port) =>
+            state.SetProxyRequested += (ip, port, direct) =>
             {
                 if (session.State != ConnState.Disconnected) return; // во время подключения прокси не меняется
                 settings.Ip = ip;
                 settings.Port = port;
                 state.Ip = ip;
+                settings.DirectPort = direct;
                 state.Port = port;
-                state.SettingsError = Settings.ValidateProxy(ip, port);
+                state.DirectPort = direct;
+                state.SettingsError = Settings.ValidateProxy(ip, port) ?? Settings.ValidateDirectPort(direct, port);
                 try { settings.Save(settingsPath); }
                 catch (Exception) { } // папка недоступна для записи: работаем без сохранения
             };

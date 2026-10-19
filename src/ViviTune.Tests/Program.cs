@@ -72,15 +72,15 @@ static class Program
             "ClickGuard: второе нажатие в течение 500 мс после принятого не принимается");
 
         var v = new ViewState();
-        var first = v.SyncApps(new List<AppEntry> { new() { Path = @"C:\Apps\Discord.exe" }, new() { Path = @"C:\Apps\chrome.exe", Enabled = false } });
+        var first = v.SyncApps(new List<AppEntry> { new() { Path = @"C:\Apps\Discord.exe" }, new() { Path = @"C:\Apps\chrome.exe", Enabled = false } }, new());
         var discord = v.Apps[0];
         Check(first.Count == 2 && v.Apps.Count == 2 && discord.Name == "Discord" && discord.FileName == "Discord.exe" && discord.Enabled
             && !v.Apps[1].Enabled, "ViewState.SyncApps: строки по списку (имя из имени файла)");
-        var added = v.SyncApps(new List<AppEntry> { new() { Path = @"c:\apps\DISCORD.exe", Enabled = false }, new() { Path = @"C:\Apps\Steam.exe" } });
+        var added = v.SyncApps(new List<AppEntry> { new() { Path = @"c:\apps\DISCORD.exe", Enabled = false }, new() { Path = @"C:\Apps\Steam.exe" } }, new());
         Check(added.Count == 1 && added[0].Path == @"C:\Apps\Steam.exe" && v.Apps.Count == 2 && ReferenceEquals(v.Apps[0], discord)
             && !discord.Enabled && v.Apps[1] == added[0], "ViewState.SyncApps: лишние убраны, новые вставлены, старые строки сохранены");
-        v.SyncApps(new List<AppEntry> { new() { Path = @"C:\a.exe" }, new() { Path = @"C:\A.EXE" } }); // дубль из старого settings.json
-        v.SyncApps(new List<AppEntry> { new() { Path = @"C:\a.exe", Enabled = false }, new() { Path = @"C:\A.EXE", Enabled = false } });
+        v.SyncApps(new List<AppEntry> { new() { Path = @"C:\a.exe" }, new() { Path = @"C:\A.EXE" } }, new()); // дубль из старого settings.json
+        v.SyncApps(new List<AppEntry> { new() { Path = @"C:\a.exe", Enabled = false }, new() { Path = @"C:\A.EXE", Enabled = false } }, new());
         Check(v.Apps.Count == 2 && v.Apps.All(r => !r.Enabled), "ViewState.SyncApps: дубли в другом регистре обновляются оба");
     }
 
@@ -224,15 +224,35 @@ static class Program
         Check(v.ProxyLabel == "SOCKS5 · 10.0.0.1:1080" && !v.SettingsEditable && v.StatusText == "Подключено",
             "ViewState: ProxyLabel, SettingsEditable, StatusText");
         int proxyEvents = 0;
-        v.SetProxyRequested += (_, _) => proxyEvents++;
-        v.RequestSetProxy("10.0.0.1", 1080); // поля страницы заполнены теми же значениями (старт)
-        v.RequestSetProxy("10.0.0.2", 1080);
+        v.SetProxyRequested += (_, _, _) => proxyEvents++;
+        v.RequestSetProxy("10.0.0.1", 1080, null); // поля страницы заполнены теми же значениями (старт)
+        v.RequestSetProxy("10.0.0.2", 1080, null);
         Check(proxyEvents == 1, "ViewState: RequestSetProxy без изменений не поднимает событие (settings.json не пишется при старте)");
 
-        Check(ViewState.Detail(new TimeSpan(0, 42, 17), true, 2) == "00:42:17 · TCP + UDP · 2 прилож.", "ViewState.Detail: время, TCP + UDP, приложения");
-        Check(ViewState.Detail(TimeSpan.FromSeconds(5), false, 1) == "00:00:05 · только TCP · 1 прилож.", "ViewState.Detail: без UDP -> только TCP");
-        Check(ViewState.Detail(TimeSpan.FromSeconds(5), null, 1) == "00:00:05 · 1 прилож.", "ViewState.Detail: UDP неизвестен -> без протоколов");
-        Check(ViewState.Detail(TimeSpan.FromSeconds(-3), true, 1) == "00:00:00 · TCP + UDP · 1 прилож.", "ViewState.Detail: отрицательное время -> 00:00:00");
+        Check(ViewState.Detail(new TimeSpan(0, 42, 17), true, 2, 2) == "00:42:17 · TCP + UDP · 2 через прокси · 2 мимо Podkop", "ViewState.Detail: оба списка");
+        Check(ViewState.Detail(TimeSpan.FromSeconds(5), false, 1, 0) == "00:00:05 · только TCP · 1 через прокси", "ViewState.Detail: без UDP, нулевая часть не пишется");
+        Check(ViewState.Detail(TimeSpan.FromSeconds(5), null, 0, 3) == "00:00:05 · 3 мимо Podkop", "ViewState.Detail: прокси не жив -> без протоколов");
+        Check(ViewState.Detail(TimeSpan.FromSeconds(-3), true, 1, 0) == "00:00:00 · TCP + UDP · 1 через прокси", "ViewState.Detail: отрицательное время -> 00:00:00");
+
+        var w = new ViewState();
+        w.SyncApps(A(@"C:\a\chrome.exe", @"C:\b\Game.exe"), new List<AppEntry> { new() { Path = @"C:\q\qbittorrent.exe", Enabled = false } });
+        Check(w.ProxyTabText == "Через прокси · 2" && w.DirectTabText == "Мимо Podkop · 0" && w.DirectApps.Count == 1 && w.ShownApps == w.Apps,
+            "ViewState: две вкладки, числа — включённые");
+        string? addedTo = null;
+        w.AddAppRequested += (p, d) => addedTo = d ? "direct" : "proxy";
+        w.DirectTab = true;
+        w.RequestAddApp(@"C:\x.exe");
+        Check(w.ShownApps == w.DirectApps && addedTo == "direct" && w.DirectHintVisible
+            && w.EmptyText == "Добавьте приложение, трафик которого пойдёт мимо Podkop",
+            "ViewState: вкладка «Мимо Podkop» — добавление туда, подсказка про порт");
+        w.DirectPort = 1819;
+        Check(!w.DirectHintVisible, "ViewState: порт задан -> подсказки нет");
+        int ev = 0;
+        w.SetProxyRequested += (_, _, _) => ev++;
+        w.Ip = "10.0.0.1"; w.Port = 1080;
+        w.RequestSetProxy("10.0.0.1", 1080, 1819);
+        w.RequestSetProxy("10.0.0.1", 1080, null);
+        Check(ev == 1, "ViewState: RequestSetProxy учитывает порт «Мимо Podkop»");
 
         var b = new ViewState();
         bool idle = !b.IsBusy && !b.IsConnected;
