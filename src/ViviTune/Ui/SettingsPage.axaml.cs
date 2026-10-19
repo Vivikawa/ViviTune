@@ -12,6 +12,7 @@ namespace ViviTune.Ui
             VersionText.Text = $"ViviTune {typeof(SettingsPage).Assembly.GetName().Version?.ToString(3)} · sing-box 1.12.12";
             IpBox.TextChanged += (_, _) => Push();
             PortBox.TextChanged += (_, _) => Push();
+            DirectPortBox.TextChanged += (_, _) => Push();
         }
 
         protected override void OnDataContextChanged(EventArgs e)
@@ -21,6 +22,7 @@ namespace ViviTune.Ui
             // TextChanged от этого заполнения придёт с теми же значениями: RequestSetProxy его пропустит
             IpBox.Text = s.Ip;
             PortBox.Text = s.Port.ToString(CultureInfo.InvariantCulture);
+            DirectPortBox.Text = s.DirectPort?.ToString(CultureInfo.InvariantCulture) ?? "";
         }
 
         void Push()
@@ -28,7 +30,7 @@ namespace ViviTune.Ui
             if (DataContext is not ViewState s) return;
             // нечисловой порт — 0: App покажет «Порт должен быть от 1 до 65535»
             int.TryParse(PortBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port);
-            s.RequestSetProxy((IpBox.Text ?? "").Trim(), port, s.DirectPort);
+            s.RequestSetProxy((IpBox.Text ?? "").Trim(), port, Settings.ParseOptionalPort(DirectPortBox.Text));
         }
     }
 }

@@ -22,14 +22,14 @@ AppBuilder.Configure<App>()
 var s = Demo();
 var window = new MainWindow(s) { Width = 900, Height = 600 };
 window.Show();
-int enabled = s.Apps.Count(a => a.Enabled);
+int enabled = s.Apps.Count(a => a.Enabled), direct = s.DirectApps.Count(a => a.Enabled);
 
 // Главная в разных состояниях (DetailText и WarningText в приложении ставит App по Session)
 Shot(NavPage.Home, "home-disconnected.png");
 s.State = ConnState.Checking;
 Shot(NavPage.Home, "home-checking.png");
 s.State = ConnState.Connected;
-s.DetailText = ViewState.Detail(new TimeSpan(0, 42, 17), true, enabled, 0);
+s.DetailText = ViewState.Detail(new TimeSpan(0, 42, 17), true, enabled, direct);
 const double MiB = 1024 * 1024;
 for (int i = 0; i < 60; i++) // демо-история: волны и всплеск отдачи; последнее значение как в макете (1.2 и 8.4 МБ/с)
 {
@@ -38,7 +38,12 @@ for (int i = 0; i < 60; i++) // демо-история: волны и вспл�
     s.PushSpeed(new Speed(up, down, (long)up, (long)down));
 }
 Shot(NavPage.Home, "home-connected.png");
-s.DetailText = ViewState.Detail(new TimeSpan(0, 3, 5), false, enabled, 0);
+// Две строки предупреждений, как их склеивает App; текст порта — копия константы Session (она не public)
+s.WarningText = "Порт «Мимо Podkop» недоступен (таймаут подключения): программы из этого списка идут обычным путём.\n"
+    + "UDP через этот прокси не работает: игры и голосовая связь могут не заработать.";
+Shot(NavPage.Home, "home-connected-warning.png");
+s.WarningText = null;
+s.DetailText = ViewState.Detail(new TimeSpan(0, 3, 5), false, enabled, direct);
 s.WarningText = "UDP через этот прокси не работает: игры и голосовая связь могут не заработать.";
 Shot(NavPage.Home, "home-connected-noudp.png");
 s.State = ConnState.Disconnected; // как Session: ошибка, затем нулевая скорость
@@ -50,6 +55,12 @@ Shot(NavPage.Home, "home-error.png");
 s.ErrorText = null;
 
 Shot(NavPage.Apps, "apps.png");
+s.DirectTab = true;
+Shot(NavPage.Apps, "apps-direct.png");
+s.DirectPort = null;
+Shot(NavPage.Apps, "apps-direct-noport.png"); // подсказка про порт
+s.DirectPort = 1819;
+s.DirectTab = false;
 var appsPage = window.GetVisualDescendants().OfType<AppsPage>().Single();
 appsPage.OpenAddPanel().Wait(); // список и иконки готовит фоновый поток; Shot применит его Post
 Shot(NavPage.Apps, "apps-add.png");
@@ -101,11 +112,16 @@ static ViewState Demo()
     {
         Ip = "192.168.1.1",
         Port = 1818,
+        DirectPort = 1819,
         ListRunning = exclude => running.Where(r => !exclude.Contains(r.Path, StringComparer.OrdinalIgnoreCase)),
         IconPng = ProcessCatalog.IconPng
     };
     s.Apps.Add(new AppRow { Path = @"C:\Users\me\AppData\Local\Discord\app-1.0.9200\Discord.exe", FileName = "Discord.exe", Name = "Discord", Enabled = true });
     s.Apps.Add(new AppRow { Path = @"C:\Program Files\Google\Chrome\Application\chrome.exe", FileName = "chrome.exe", Name = "Google Chrome", Enabled = false });
+    s.Apps.Add(new AppRow { Path = @"C:\Program Files\Mozilla Firefox\firefox.exe", FileName = "firefox.exe", Name = "Firefox", Enabled = true });
+    // Два приложения «Мимо Podkop»; Steam есть и среди запущенных — в панели «＋ Добавить» его не будет
+    foreach (var (p, name) in new[] { (@"C:\Program Files\qBittorrent\qbittorrent.exe", "qBittorrent"), (@"C:\Program Files (x86)\Steam\steam.exe", "Steam") })
+        s.DirectApps.Add(new AppRow { Path = p, FileName = System.IO.Path.GetFileName(p), Name = name, Enabled = true });
     for (int i = 0; i < 6; i++)
     {
         s.AddLog($"+0300 2026-10-18 21:{14 + i:00}:03 WARN [{3810 + i} 12ms] inbound/tun[tun-in]: process connection from 172.19.0.1:{51200 + i} to 162.159.135.232:443: connection reset by peer");

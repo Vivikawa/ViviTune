@@ -8,9 +8,12 @@
     <Border Grid.Row="1" Classes="card" Margin="0,14,0,0" Width="460" HorizontalAlignment="Left" VerticalAlignment="Top">
       <StackPanel Spacing="12">
         <TextBlock Text="Прокси SOCKS5" FontWeight="SemiBold" />
-        <Grid ColumnDefinitions="*,12,120" RowDefinitions="Auto,6,Auto">
-          <TextBlock Classes="muted" Text="IP-адрес" />
-          <TextBlock Grid.Column="2" Classes="muted" Text="Порт" />
+        <Grid ColumnDefinitions="*,12,100,12,100" RowDefinitions="Auto,6,Auto">
+          <TextBlock Classes="muted" Text="IP-адрес роутера" />
+          <TextBlock Grid.Column="2" Classes="muted" Text="Прокси" />
+          <TextBlock Grid.Column="4" Classes="muted" Text="Мимо Podkop" />
+          <TextBox Name="DirectPortBox" Grid.Row="2" Grid.Column="4" MaxLength="5" PlaceholderText="необяз."
+                   IsEnabled="{Binding SettingsEditable}" />
           <TextBox Name="IpBox" Grid.Row="2" MaxLength="45" PlaceholderText="192.168.1.1"
                    IsEnabled="{Binding SettingsEditable}" />
           <TextBox Name="PortBox" Grid.Row="2" Grid.Column="2" MaxLength="5" PlaceholderText="1818"
@@ -18,8 +21,10 @@
         </Grid>
         <TextBlock Classes="error" Text="{Binding SettingsError}"
                    IsVisible="{Binding SettingsError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        <TextBlock Classes="muted" TextWrapping="Wrap"
+                   Text="Мимо Podkop — Mixed-порт отдельной секции Podkop, инструкция в README." />
         <TextBlock Classes="muted" TextWrapping="Wrap" IsVisible="{Binding !SettingsEditable}"
-                   Text="Изменить адрес прокси можно после отключения." />
+                   Text="Изменить настройки прокси можно после отключения." />
         <TextBlock Classes="muted" TextWrapping="Wrap" IsVisible="{Binding SettingsEditable}"
                    Text="Сохраняется автоматически." />
       </StackPanel>

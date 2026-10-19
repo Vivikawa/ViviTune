@@ -56,7 +56,7 @@ namespace ViviTune.Ui
             SearchBox.Text = "";
             Filter();
             AddPopup.IsOpen = true;
-            var added = s.Apps.Select(a => a.Path).ToList();
+            var added = s.Apps.Concat(s.DirectApps).Select(a => a.Path).ToList();
             return Task.Run(() =>
             {
                 List<(AppRow Row, bool Background)> rows;
@@ -89,7 +89,7 @@ namespace ViviTune.Ui
         void Filter()
         {
             var q = (SearchBox.Text ?? "").Trim();
-            var apps = State?.Apps;
+            var apps = State?.Apps.Concat(State.DirectApps).ToList();
             void Fill(ObservableCollection<AppRow> to, List<AppRow> from)
             {
                 to.Clear();
@@ -110,6 +110,17 @@ namespace ViviTune.Ui
                 : shownBg.Count > 0 ? ""
                 : "Ничего не найдено";
             RunningHint.IsVisible = RunningHint.Text.Length > 0;
+        }
+
+        void OnProxyTab(object? sender, RoutedEventArgs e) => SetTab(false);
+        void OnDirectTab(object? sender, RoutedEventArgs e) => SetTab(true);
+
+        // Смена вкладки закрывает панель: добавление идёт в открытый список
+        void SetTab(bool direct)
+        {
+            if (State is not { } s || s.DirectTab == direct) return;
+            AddPopup.IsOpen = false;
+            s.DirectTab = direct;
         }
 
         void OnPickRunning(object? sender, RoutedEventArgs e)

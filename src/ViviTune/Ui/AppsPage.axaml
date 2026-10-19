@@ -53,6 +53,28 @@
       <Setter Property="Background" Value="#252a4d" />
       <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     </Style>
+    <!-- Вкладка сегмента: выбранная — фон LineBrush и светлый текст -->
+    <Style Selector="Button.tab">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="7" />
+      <Setter Property="Padding" Value="14,6" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.tab:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    </Style>
+    <Style Selector="Button.tab.on /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource LineBrush}" />
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.tab.warn.on /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Foreground" Value="{StaticResource WarnBrush}" />
+    </Style>
     <!-- Подпись раздела панели -->
     <Style Selector="TextBlock.lab">
       <Setter Property="FontSize" Value="10.5" />
@@ -63,13 +85,24 @@
   </UserControl.Styles>
 
   <Grid RowDefinitions="Auto,*" Margin="24,18,24,16">
-    <TextBlock Classes="title" Text="Приложения через прокси" />
+    <StackPanel Spacing="10">
+      <TextBlock Classes="title" Text="Приложения" />
+      <!-- Сегмент из двух вкладок (вариант B макета) -->
+      <Border Background="{StaticResource CardBrush}" CornerRadius="9" Padding="3" HorizontalAlignment="Left">
+        <StackPanel Orientation="Horizontal" Spacing="3">
+          <Button Classes="tab" Classes.on="{Binding !DirectTab}" Content="{Binding ProxyTabText}" Click="OnProxyTab" />
+          <Button Classes="tab warn" Classes.on="{Binding DirectTab}" Content="{Binding DirectTabText}" Click="OnDirectTab" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
 
     <ScrollViewer Name="ListArea" Grid.Row="1" Margin="0,14,0,0">
       <StackPanel Spacing="8">
-        <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" IsVisible="{Binding !Apps.Count}"
-                   Text="Добавьте приложение, трафик которого пойдёт через прокси" />
-        <ItemsControl ItemsSource="{Binding Apps}">
+        <TextBlock Classes="warning" FontSize="13" TextWrapping="Wrap" IsVisible="{Binding DirectHintVisible}"
+                   Text="Укажите порт «Мимо Podkop» в настройках, иначе эти программы идут обычным путём." />
+        <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" IsVisible="{Binding !ShownApps.Count}"
+                   Text="{Binding EmptyText}" />
+        <ItemsControl ItemsSource="{Binding ShownApps}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
               <StackPanel Spacing="8" />
