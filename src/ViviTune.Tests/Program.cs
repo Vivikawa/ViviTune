@@ -305,6 +305,9 @@ static class Program
         return -1;
     }
 
+    static JsonObject? AppRule(JsonArray rules, string outbound) =>
+        rules.Select(Obj).FirstOrDefault(r => r.ContainsKey("process_name") && Str(r["outbound"]) == outbound);
+
     static void ConfigTests()
     {
         var s = new Settings { Ip = "192.168.1.1", Port = 1818, Apps = A(@"C:\a b\chrome.exe", @"C:\Игра\Игра.exe") };
@@ -348,6 +351,40 @@ static class Program
         bool threw = false;
         try { ConfigBuilder.Build(new Settings(), 9090, "t"); } catch (InvalidOperationException) { threw = true; }
         Check(threw, "Build: пустой список приложений -> исключение (иначе правило без условий матчит всё)");
+        var two = new Settings { Ip = "192.168.1.1", Port = 1818, DirectPort = 1819,
+            Apps = A(@"C:\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe", @"D:\CHROME.EXE") };
+        JsonObject B(Exits? live) => JsonNode.Parse(ConfigBuilder.Build(two, 9090, "t", live))!.AsObject();
+        JsonArray R(JsonObject c2) => Arr(Obj(c2["route"])["rules"]);
+        bool HasOut(JsonObject c2, string tag) => Arr(c2["outbounds"]).Any(o => Str(Obj(o)["tag"]) == tag);
+
+        var all = B(null);
+        var bo = Arr(all["outbounds"]).Select(Obj).First(o => Str(o["tag"]) == "bypass");
+        Check(Str(bo["type"]) == "socks" && Str(bo["server"]) == "192.168.1.1" && (int)bo["server_port"]! == 1819 && Str(bo["version"]) == "5",
+            "bypass: socks outbound на IP роутера и порт «Мимо Podkop»");
+        Check(Arr(AppRule(R(all), "bypass")!["process_name"]).Select(x => Str(x)).SequenceEqual(new[] { "qbittorrent.exe" })
+            && Arr(AppRule(R(all), "proxy")!["process_name"]).Select(x => Str(x)).SequenceEqual(new[] { "chrome.exe" }),
+            "bypass: правила по спискам, имя из обоих списков только в proxy");
+        Check(IndexOfRule(R(all), "ip_cidr") < R(all).IndexOf(AppRule(R(all), "bypass")), "bypass: адрес роутера напрямую раньше правил приложений");
+
+        var px = B(new Exits(true, false));
+        Check(!HasOut(px, "bypass") && AppRule(R(px), "bypass") == null && AppRule(R(px), "proxy") != null,
+            "жив только прокси: нет outbound bypass и его правила");
+
+        var bp = B(new Exits(false, true));
+        Check(AppRule(R(bp), "proxy") == null && AppRule(R(bp), "bypass") != null && Arr(Obj(bp["dns"])["rules"]).Count == 0,
+            "жив только bypass: нет правила proxy и DNS-правила proxy-dns");
+
+        var onlyDirect = new Settings { Port = 1818, DirectPort = 1819, DirectApps = A(@"C:\q\qbittorrent.exe") };
+        var od = JsonNode.Parse(ConfigBuilder.Build(onlyDirect, 9090, "t"))!.AsObject();
+        Check(AppRule(R(od), "proxy") == null && Arr(Obj(od["dns"])["rules"]).Count == 0 && AppRule(R(od), "bypass") != null,
+            "нет программ «Через прокси»: нет правил с пустым process_name");
+
+        var noPort = new Settings { Port = 1818, Apps = A(@"C:\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe") };
+        Check(!HasOut(JsonNode.Parse(ConfigBuilder.Build(noPort, 9090, "t"))!.AsObject(), "bypass"), "DirectPort не задан: bypass нет");
+
+        bool none = false;
+        try { ConfigBuilder.Build(two, 9090, "t", new Exits(false, false)); } catch (InvalidOperationException) { none = true; }
+        Check(none, "Build: ни одного живого выхода с программами -> исключение");
     }
 
     // Фейковый SOCKS5-сервер: на каждое соединение отвечает заданными байтами.

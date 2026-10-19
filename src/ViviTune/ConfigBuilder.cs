@@ -7,6 +7,9 @@ using System.Text.Json;
 
 namespace ViviTune
 {
+    // Какие выходы сейчас живы: прокси и «Мимо Podkop».
+    public readonly record struct Exits(bool Proxy, bool Bypass);
+
     public static class ConfigBuilder
     {
         static readonly JsonCtx Json = new(new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
@@ -18,14 +21,36 @@ namespace ViviTune
             return d;
         }
 
-        public static string Build(Settings s, int apiPort, string apiSecret)
+        public static string Build(Settings s, int apiPort, string apiSecret, Exits? live = null)
         {
             var err = s.Validate();
             if (err != null) throw new InvalidOperationException(err);
 
-            var names = s.ProcessNames().ToArray();
+            // null: прокси жив, bypass жив, если задан порт
+            var l = live ?? new Exits(true, s.DirectPort != null);
+            var proxyNames = l.Proxy ? s.ProcessNames().ToArray() : Array.Empty<string>();
+            var bypassNames = l.Bypass && s.DirectPort != null ? s.BypassNames().ToArray() : Array.Empty<string>();
+            if (proxyNames.Length == 0 && bypassNames.Length == 0)
+                throw new InvalidOperationException("Нет правил: ни одного живого выхода с программами");
             var ip = IPAddress.Parse(s.Ip);
             var cidr = ip + (ip.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32");
+
+            var outbounds = new List<object>
+            {
+                D("type", "socks", "tag", "proxy", "server", ip.ToString(), "server_port", s.Port, "version", "5"),
+                D("type", "direct", "tag", "direct")
+            };
+            if (bypassNames.Length > 0)
+                outbounds.Add(D("type", "socks", "tag", "bypass", "server", ip.ToString(), "server_port", s.DirectPort!.Value, "version", "5"));
+
+            var rules = new List<object>
+            {
+                D("action", "sniff"),
+                D("protocol", "dns", "action", "hijack-dns"),
+                D("ip_cidr", new object[] { cidr }, "outbound", "direct")
+            };
+            if (proxyNames.Length > 0) rules.Add(D("process_name", proxyNames, "outbound", "proxy"));
+            if (bypassNames.Length > 0) rules.Add(D("process_name", bypassNames, "outbound", "bypass"));
 
             var config = D(
                 "log", D("level", "warn", "timestamp", true),
@@ -36,24 +61,14 @@ namespace ViviTune
                         D("type", "local", "tag", "local"),
                         D("type", "tcp", "tag", "proxy-dns", "server", "1.1.1.1", "detour", "proxy")
                     },
-                    "rules", new object[] { D("process_name", names, "server", "proxy-dns") }),
+                    "rules", proxyNames.Length > 0 ? new object[] { D("process_name", proxyNames, "server", "proxy-dns") } : Array.Empty<object>()),
                 "inbounds", new object[]
                 {
                     D("type", "tun", "tag", "tun-in", "address", new object[] { "172.19.0.1/30", "fdfe:dcba:9876::1/126" }, "auto_route", true, "strict_route", false)
                 },
-                "outbounds", new object[]
-                {
-                    D("type", "socks", "tag", "proxy", "server", ip.ToString(), "server_port", s.Port, "version", "5"),
-                    D("type", "direct", "tag", "direct")
-                },
+                "outbounds", outbounds.ToArray(),
                 "route", D(
-                    "rules", new object[]
-                    {
-                        D("action", "sniff"),
-                        D("protocol", "dns", "action", "hijack-dns"),
-                        D("ip_cidr", new object[] { cidr }, "outbound", "direct"),
-                        D("process_name", names, "outbound", "proxy")
-                    },
+                    "rules", rules.ToArray(),
                     "final", "direct",
                     "auto_detect_interface", true,
                     "default_domain_resolver", "local"));
