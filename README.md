@@ -39,6 +39,8 @@ ViviTune запускает [sing-box](https://github.com/SagerNet/sing-box) в 
 
 ## Включение Mixed-прокси в Podkop
 
+[Podkop](https://github.com/itdoginfo/podkop) — проект [ITDog](https://github.com/itdoginfo) для точечной маршрутизации трафика на OpenWrt. Документация: [podkop.net](https://podkop.net/). Спасибо авторам за отличный инструмент! Если он вам пригодился, поставьте им звезду на GitHub.
+
 Mixed-прокси — встроенная функция Podkop: роутер открывает порт, который принимает SOCKS5 и HTTP и отправляет **весь** трафик с этого порта через прокси или VPN выбранной секции, независимо от списков доменов. Именно это и нужно ViviTune. UDP через SOCKS5 тоже работает.
 
 ### Через веб-интерфейс (LuCI)
