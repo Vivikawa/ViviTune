@@ -759,6 +759,96 @@
       "last_seen": "2026-10-18T18:11:06.000Z",
       "occurrences": 1,
       "related_bugs": []
+    },
+    {
+      "error_message": "Significant refactor of ProcessCatalog.cs",
+      "file": "src/ViviTune/Windows/ProcessCatalog.cs",
+      "root_cause": "5 lines replaced/restructured",
+      "fix": "Rewrote 30→35 lines (5 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-043",
+      "timestamp": "2026-10-19T03:24:00.149Z",
+      "last_seen": "2026-10-19T03:24:00.149Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Significant refactor of Program.cs",
+      "file": "src/ViviTune.Shots/Program.cs",
+      "root_cause": "8 lines replaced/restructured",
+      "fix": "Rewrote 11→14 lines (8 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-044",
+      "timestamp": "2026-10-19T03:24:39.953Z",
+      "last_seen": "2026-10-19T03:24:39.953Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Significant refactor of AppsPage.axaml.cs",
+      "file": "src/ViviTune/Ui/AppsPage.axaml.cs",
+      "root_cause": "4 lines replaced/restructured",
+      "fix": "Rewrote 12→23 lines (4 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-045",
+      "timestamp": "2026-10-19T03:25:46.617Z",
+      "last_seen": "2026-10-19T03:25:46.617Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Missing guard clause",
+      "file": "src/ViviTune/Ui/App.axaml.cs",
+      "root_cause": "No early return/throw for edge case: e.CloseReason != WindowCloseReason.WindowClosing || e.IsProg",
+      "fix": "Added guard clause: if (e.CloseReason != WindowCloseReason.Windo)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-046",
+      "timestamp": "2026-10-19T03:27:25.818Z",
+      "last_seen": "2026-10-19T03:27:25.818Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Wrong reference: ApplicationLifetimes should be using",
+      "file": "src/ViviTune/Ui/App.axaml.cs",
+      "root_cause": "Used \"ApplicationLifetimes\" instead of \"using\"",
+      "fix": "Changed ApplicationLifetimes → using",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-047",
+      "timestamp": "2026-10-19T03:27:31.436Z",
+      "last_seen": "2026-10-19T03:27:31.436Z",
+      "occurrences": 1,
+      "related_bugs": []
     }
   ],
   "applied_observations": {
@@ -796,7 +886,12 @@
     "8bcc87c0-0c2a-4b9e-88d9-9f017ad2c162": true,
     "4a42c13c-44e6-4c20-b3a8-1ed7f88d388a": true,
     "ed1d195a-37ac-41ed-9b69-21f1d2a6b5f6": true,
-    "070b36a8-1dd2-4518-9ee7-64e3979e1a03": true
+    "070b36a8-1dd2-4518-9ee7-64e3979e1a03": true,
+    "b45d3046-8904-47ee-82a0-b084280e3420": true,
+    "995083cc-7e9f-4894-a2ea-ca92346eb27c": true,
+    "372d4be3-6867-4b12-9ffb-c2336fe5dc21": true,
+    "ca8ff811-188a-4f8a-bc7f-b88484b6850b": true,
+    "ae69cf53-0d71-47dc-9c6f-7eea6f0464af": true
   },
-  "next_id": 43
+  "next_id": 48
 }

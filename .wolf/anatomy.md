@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-10-18T18:12:19.504Z
-> Files: 51 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-10-19T03:29:02.591Z
+> Files: 53 tracked | Anatomy hits: 0 | Misses: 0
 
 > Project structure index. Auto-maintained by OpenWolf hooks and daemon.
 > Run `openwolf scan` to generate, or wait for the first Claude Code session.
@@ -47,18 +47,19 @@
 
 ## src/ViviTune.Shots/
 
-- `Program.cs` — Class: Program (~1770 tok)
+- `Program.cs` — Class: Program (~1632 tok)
 - `ViviTune.Shots.csproj` (~135 tok)
 
 ## src/ViviTune.Tests/
 
-- `Program.cs` — Class: Program (~10579 tok)
+- `Program.cs` — Class: Program (~11016 tok)
 - `ViviTune.Tests.csproj` (~132 tok)
 
 ## src/ViviTune/
 
 - `ConfigBuilder.cs` — Class: ConfigBuilder (~628 tok)
 - `MainForm.cs` — Class: MainForm (~1832 tok)
+- `Program.cs` — Class: Program (~243 tok)
 - `ProxyProbe.cs` — Class: ProbeResult (~536 tok)
 - `Runner.cs` — Class: Runner (~1170 tok)
 - `Session.cs` — Class: Session (~3205 tok)
@@ -69,10 +70,10 @@
 ## src/ViviTune/Ui/
 
 - `App.axaml` (~141 tok)
-- `App.axaml.cs` — Class: App (~1702 tok)
+- `App.axaml.cs` — Class: App (~2304 tok)
 - `AppListOps.cs` — Список приложений из Settings: пути сравниваются без учёта регистра. Без Avalonia (тестируется отдел (~490 tok)
-- `AppsPage.axaml` (~2288 tok)
-- `AppsPage.axaml.cs` — Class: AppsPage (~1471 tok)
+- `AppsPage.axaml` (~2481 tok)
+- `AppsPage.axaml.cs` — Class: AppsPage (~1852 tok)
 - `ClickGuard.cs` — Повторное нажатие в течение 500 мс после принятого не принимается: двойной клик не попадает (~125 tok)
 - `HomePage.axaml` (~1732 tok)
 - `HomePage.axaml.cs` — Class: HomePage (~158 tok)
@@ -84,9 +85,10 @@
 - `SettingsPage.axaml.cs` — Class: SettingsPage (~349 tok)
 - `Sparkline.cs` — Class: Sparkline (~1174 tok)
 - `Theme.axaml` (~2143 tok)
-- `ViewState.cs` — Class: ViewState (~2434 tok)
+- `ViewState.cs` — Class: ViewState (~2673 tok)
 
 ## src/ViviTune/Windows/
 
-- `ProcessCatalog.cs` — Class: ProcessCatalog (~747 tok)
+- `Native.cs` — Class: Native (~115 tok)
+- `ProcessCatalog.cs` — Class: ProcessCatalog (~923 tok)
 - `Runner.cs` — Class: Runner (~1233 tok)

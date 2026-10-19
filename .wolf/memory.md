@@ -179,3 +179,28 @@ description: chronological action log per session, consolidated weekly
 | 23:11 | Created .superpowers/sdd/2026-10-18-vivitune-avalonia-ui/final-fix-report.md | — | ~2940 |
 | 23:12 | Edited .superpowers/sdd/2026-10-18-vivitune-avalonia-ui/final-fix-report.md | inline fix | ~37 |
 | 04:01 | Session end: 139 writes across 39 files (Runner.cs, ProxyProbe.cs, MainForm.cs, Settings.cs, layout.html) | 74 reads | ~182652 tok |
+
+## Session: 2026-10-19 08:13
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 08:23 | Edited src/ViviTune.Tests/Program.cs | 1→5 lines | ~148 |
+| 08:24 | Edited src/ViviTune/Windows/ProcessCatalog.cs | modified Running() | ~607 |
+| 08:24 | Edited src/ViviTune/Ui/ViewState.cs | 2→2 lines | ~72 |
+| 08:24 | Edited src/ViviTune/Ui/App.axaml.cs | inline fix | ~21 |
+| 08:24 | Edited src/ViviTune.Shots/Program.cs | 11→14 lines | ~300 |
+| 08:24 | Edited src/ViviTune/Ui/AppsPage.axaml | expanded (+14 lines) | ~317 |
+| 08:25 | Edited src/ViviTune/Ui/AppsPage.axaml | 20→15 lines | ~251 |
+| 08:25 | Edited src/ViviTune/Ui/AppsPage.axaml.cs | modified Fill() | ~302 |
+| 08:25 | Edited src/ViviTune/Ui/AppsPage.axaml.cs | inline fix | ~25 |
+| 08:25 | Edited src/ViviTune.Shots/Program.cs | 2→7 lines | ~151 |
+| 08:26 | Edited src/ViviTune/Windows/Native.cs | 5→5 lines | ~83 |
+| 08:26 | Edited src/ViviTune/Program.cs | modified if() | ~138 |
+| 08:27 | Edited src/ViviTune/Ui/App.axaml.cs | 2→3 lines | ~61 |
+| 08:27 | Edited src/ViviTune/Ui/App.axaml.cs | 1→6 lines | ~112 |
+| 08:27 | Edited src/ViviTune/Ui/App.axaml.cs | 3→6 lines | ~100 |
+| 08:27 | Edited src/ViviTune/Ui/App.axaml.cs | added 2 condition(s) | ~423 |
+| 08:27 | Edited src/ViviTune/Ui/App.axaml.cs | 2→3 lines | ~23 |
+| 08:29 | Edited src/ViviTune/Ui/App.axaml.cs | — | ~0 |
+<!-- session:YmM3OTNiZDktNDE5MS00OTM5LWJiNjgtODAwNzkyZTcxODRm -->
+| 2026-10-19T03:31:01.903Z | Add panel: windowless programs split into collapsed 'Фоновые' section (ProcessCatalog.Group, RunningApp.Background); close button hides to tray (TrayIcon menu Открыть/Подключить/Выход, status tooltip); second launch signals first via named event ViviTune.Show instead of message box | src/ViviTune/Windows/ProcessCatalog.cs,src/ViviTune/Ui/AppsPage.axaml,src/ViviTune/Ui/AppsPage.axaml.cs,src/ViviTune/Ui/ViewState.cs,src/ViviTune/Ui/App.axaml.cs,src/ViviTune/Program.cs,src/ViviTune/Windows/Native.cs,src/ViviTune.Shots/Program.cs,src/ViviTune.Tests/Program.cs | tests pass, Shots render, trimmed publish ok; tray runtime not yet checked by user |

@@ -1,13 +1,13 @@
 {
   "version": 1,
   "meta": {
-    "lastScanned": "2026-10-18T18:12:19.504Z",
-    "fileCount": 51,
+    "lastScanned": "2026-10-19T03:29:02.591Z",
+    "fileCount": 53,
     "hits": 0,
     "misses": 0,
-    "renderedHash": "07daf1408ca94a8344f65b40400cd8547c7a3796f4537492b64d987bc4111340",
-    "storeUpdatedAt": "2026-10-18T18:12:19.513Z",
-    "rootHash": "a6c896a6f8cba8f3"
+    "renderedHash": "bad63793cd1ddf61746976939701e86568c16562cfb747893cc515c58f655347",
+    "storeUpdatedAt": "2026-10-19T03:29:02.601Z",
+    "rootHash": "53e72750bfc31493"
   },
   "files": {
     "AGENTS.md": {
@@ -57,11 +57,11 @@
     },
     "src/ViviTune.Tests/Program.cs": {
       "description": "Class: Program",
-      "tokens": 10579,
-      "hash": "ee41cebb411e2ce5",
-      "size": 43081,
-      "mtimeMs": 1792346940430.3232,
-      "updatedAt": "2026-10-18T18:09:00.565Z",
+      "tokens": 11016,
+      "hash": "5f33534fdb9b329f",
+      "size": 45070,
+      "mtimeMs": 1792380211777.8914,
+      "updatedAt": "2026-10-19T03:23:32.041Z",
       "source": "hook"
     },
     "src/ViviTune/Settings.cs": {
@@ -246,20 +246,20 @@
     },
     "src/ViviTune/Windows/ProcessCatalog.cs": {
       "description": "Class: ProcessCatalog",
-      "tokens": 747,
-      "hash": "259c2f4629a07b3a",
-      "size": 2872,
-      "mtimeMs": 1792346904862.3083,
-      "updatedAt": "2026-10-18T18:08:25.139Z",
+      "tokens": 923,
+      "hash": "b3a44aca32be5555",
+      "size": 3739,
+      "mtimeMs": 1792380239774.1475,
+      "updatedAt": "2026-10-19T03:24:00.061Z",
       "source": "hook"
     },
     "src/ViviTune/Ui/ViewState.cs": {
       "description": "Class: ViewState",
-      "tokens": 2434,
-      "hash": "e567809075c6eb03",
-      "size": 10166,
-      "mtimeMs": 1792344923510.848,
-      "updatedAt": "2026-10-18T17:35:23.657Z",
+      "tokens": 2673,
+      "hash": "13668960877a9224",
+      "size": 11141,
+      "mtimeMs": 1792380268373.1704,
+      "updatedAt": "2026-10-19T03:24:28.641Z",
       "source": "hook"
     },
     "src/ViviTune/Ui/Theme.axaml": {
@@ -282,11 +282,11 @@
     },
     "src/ViviTune/Ui/App.axaml.cs": {
       "description": "Class: App",
-      "tokens": 1702,
-      "hash": "a35a89bbfc4b3506",
-      "size": 7115,
-      "mtimeMs": 1792344928972.4783,
-      "updatedAt": "2026-10-18T17:35:29.112Z",
+      "tokens": 2304,
+      "hash": "195b339021cc0b98",
+      "size": 9630,
+      "mtimeMs": 1792380542434.2827,
+      "updatedAt": "2026-10-19T03:29:02.590Z",
       "source": "hook"
     },
     "src/ViviTune/Ui/MainWindow.axaml": {
@@ -327,20 +327,20 @@
     },
     "src/ViviTune/Ui/AppsPage.axaml": {
       "description": "",
-      "tokens": 2288,
-      "hash": "39eedba5d6c625a9",
-      "size": 9153,
-      "mtimeMs": 1792344797493.2932,
-      "updatedAt": "2026-10-18T17:33:17.636Z",
+      "tokens": 2481,
+      "hash": "6449e9940ea96cd2",
+      "size": 9995,
+      "mtimeMs": 1792380300518.235,
+      "updatedAt": "2026-10-19T03:25:00.654Z",
       "source": "hook"
     },
     "src/ViviTune/Ui/AppsPage.axaml.cs": {
       "description": "Class: AppsPage",
-      "tokens": 1471,
-      "hash": "6c9839d819150288",
-      "size": 6180,
-      "mtimeMs": 1792346894008,
-      "updatedAt": "2026-10-18T18:08:14.154Z",
+      "tokens": 1852,
+      "hash": "1ac917484aafe282",
+      "size": 7749,
+      "mtimeMs": 1792380351984.3408,
+      "updatedAt": "2026-10-19T03:25:52.170Z",
       "source": "hook"
     },
     "src/ViviTune/Ui/LogPage.axaml": {
@@ -390,11 +390,11 @@
     },
     "src/ViviTune.Shots/Program.cs": {
       "description": "Class: Program",
-      "tokens": 1770,
-      "hash": "8ff0f2a6dc3f35e7",
-      "size": 7431,
-      "mtimeMs": 1792344980293.9717,
-      "updatedAt": "2026-10-18T17:36:20.433Z",
+      "tokens": 1632,
+      "hash": "47ae184674414e76",
+      "size": 7028,
+      "mtimeMs": 1792380357515.4668,
+      "updatedAt": "2026-10-19T03:25:57.660Z",
       "source": "hook"
     },
     ".superpowers/sdd/2026-10-18-vivitune-avalonia-ui/task-7-report.md": {
@@ -467,6 +467,24 @@
       "size": 12616,
       "mtimeMs": 1792347139371.0405,
       "updatedAt": "2026-10-18T18:12:19.503Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Windows/Native.cs": {
+      "description": "Class: Native",
+      "tokens": 115,
+      "hash": "a305d407fb272842",
+      "size": 510,
+      "mtimeMs": 1792380390574.4812,
+      "updatedAt": "2026-10-19T03:26:30.835Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Program.cs": {
+      "description": "Class: Program",
+      "tokens": 243,
+      "hash": "0c40e27224829a99",
+      "size": 1018,
+      "mtimeMs": 1792380396262.9175,
+      "updatedAt": "2026-10-19T03:26:36.532Z",
       "source": "hook"
     }
   },
