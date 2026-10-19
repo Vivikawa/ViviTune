@@ -4,3 +4,13 @@ obj/
 src/ViviTune/third_party/
 *.user
 artifacts/
+
+# AI tooling: kept locally, not published
+.wolf/
+.claude/
+.codex/
+.cursor/
+.opencode/
+AGENTS.md
+CLAUDE.md
+docs/superpowers/

@@ -29,6 +29,8 @@
     <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
     <AvaloniaResource Include="Assets\icon.ico" />
     <None Include="third_party\sing-box.exe" Condition="Exists('third_party\sing-box.exe')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Link="sing-box.exe" />
+    <None Include="..\..\LICENSE" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Link="LICENSE.txt" />
+    <None Include="..\..\THIRD-PARTY-NOTICES.txt" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Link="THIRD-PARTY-NOTICES.txt" />
   </ItemGroup>
   <Target Name="CleanNativePdb" AfterTargets="Publish" Condition="'$(_IsPublishing)' == 'true'">
     <Delete Files="$(PublishDir)libSkiaSharp.pdb;$(PublishDir)libHarfBuzzSharp.pdb" />
