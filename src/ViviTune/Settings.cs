@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
 namespace ViviTune
 {
@@ -16,12 +17,12 @@ namespace ViviTune
 
     public class Settings
     {
-        static readonly JsonSerializerOptions Json = new()
+        static readonly JsonCtx Json = new(new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
             WriteIndented = true,
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-        };
+        });
 
         public string Ip { get; set; } = "192.168.1.1";
         public int Port { get; set; } = 1818;
@@ -46,7 +47,7 @@ namespace ViviTune
                             if (item is JsonValue v && v.TryGetValue<string>(out var str)) s.Apps.Add(new AppEntry { Path = str });
                             else if (item is JsonObject o)
                             {
-                                try { var e = o.Deserialize<AppEntry>(Json); if (e != null) s.Apps.Add(e); }
+                                try { var e = o.Deserialize(Json.AppEntry); if (e != null) s.Apps.Add(e); }
                                 catch (JsonException) { } // элемент неверного вида: пропускаем
                             }
                         }
@@ -59,7 +60,7 @@ namespace ViviTune
 
         public void Save(string path)
         {
-            File.WriteAllText(path, JsonSerializer.Serialize(this, Json));
+            File.WriteAllText(path, JsonSerializer.Serialize(this, Json.Settings));
         }
 
         // null, если всё корректно; иначе текст ошибки для пользователя
@@ -95,4 +96,15 @@ namespace ViviTune
             return result;
         }
     }
+
+    // JSON без рефлексии: сборка обрезается (PublishTrimmed), и рефлексия в ней не работает.
+    // Значения конфига sing-box (ConfigBuilder) — object, поэтому их типы перечислены здесь.
+    [JsonSerializable(typeof(Settings))]
+    [JsonSerializable(typeof(Dictionary<string, object>))]
+    [JsonSerializable(typeof(object[]))]
+    [JsonSerializable(typeof(string[]))]
+    [JsonSerializable(typeof(string))]
+    [JsonSerializable(typeof(int))]
+    [JsonSerializable(typeof(bool))]
+    internal partial class JsonCtx : JsonSerializerContext { }
 }

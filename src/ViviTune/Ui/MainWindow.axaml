@@ -4,6 +4,7 @@
         x:Class="ViviTune.Ui.MainWindow"
         x:DataType="ui:ViewState"
         Title="ViviTune"
+        Icon="/Assets/icon.ico"
         Width="900" Height="640"
         MinWidth="760" MinHeight="520"
         Background="{StaticResource BgBrush}"

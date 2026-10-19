@@ -9,7 +9,7 @@ namespace ViviTune
 {
     public static class ConfigBuilder
     {
-        static readonly JsonSerializerOptions Json = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        static readonly JsonCtx Json = new(new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 
         static Dictionary<string, object> D(params object[] kv)
         {
@@ -58,7 +58,7 @@ namespace ViviTune
                     "auto_detect_interface", true,
                     "default_domain_resolver", "local"));
 
-            return JsonSerializer.Serialize(config, Json);
+            return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
         }
     }
 }

@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
     <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
@@ -15,6 +16,8 @@
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
     <DebugType>none</DebugType>
     <AllowedReferenceRelatedFileExtensions>.xml</AllowedReferenceRelatedFileExtensions>
   </PropertyGroup>
@@ -24,6 +27,7 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.4" />
     <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
+    <AvaloniaResource Include="Assets\icon.ico" />
     <None Include="third_party\sing-box.exe" Condition="Exists('third_party\sing-box.exe')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Link="sing-box.exe" />
   </ItemGroup>
   <Target Name="CleanNativePdb" AfterTargets="Publish" Condition="'$(_IsPublishing)' == 'true'">
