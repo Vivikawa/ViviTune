@@ -21,6 +21,7 @@ static class Program
         ConfigTests();
         ProbeTests();
         TrafficTests();
+        EvaluateTests();
         SessionTests();
         CatalogTests();
         ViewStateTests();
@@ -549,6 +550,45 @@ static class Program
 
     static ProbeResult Up(string ip, int port) => new ProbeResult { Reachable = true, UdpSupported = true };
 
+    static ProbeResult DownProbe(string ip, int port) => new ProbeResult { Error = "таймаут подключения" };
+
+    static Settings Both() => new Settings { Ip = "127.0.0.1", Port = 1080, DirectPort = 1090,
+        Apps = A(@"C:\a\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe") };
+
+    static void EvaluateTests()
+    {
+        var ok = new ProbeResult { Reachable = true, UdpSupported = true };
+        var noUdp = new ProbeResult { Reachable = true, UdpSupported = false };
+        var down = new ProbeResult { Error = "таймаут подключения" };
+        var s2 = new Settings { Port = 1080, DirectPort = 1090, Apps = A(@"C:\a\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe") };
+
+        var v = Session.Evaluate(s2, ok, ok);
+        Check(v.Error == null && v.Live == new Exits(true, true) && v.Warnings.Count == 0 && v.UdpOk == true, "Evaluate: оба живы");
+        v = Session.Evaluate(s2, down, ok);
+        Check(v.Error == null && v.Live == new Exits(false, true) && v.UdpOk == null
+            && v.Warnings.SequenceEqual(new[] { "Прокси недоступен (таймаут подключения): программы «Через прокси» идут обычным путём." }),
+            "Evaluate: прокси недоступен, bypass жив -> предупреждение");
+        v = Session.Evaluate(s2, noUdp, down);
+        Check(v.Live == new Exits(true, false) && v.Warnings.SequenceEqual(new[] {
+                "Порт «Мимо Podkop» недоступен (таймаут подключения): программы из этого списка идут обычным путём.",
+                "UDP через этот прокси не работает: игры и голосовая связь могут не заработать." }),
+            "Evaluate: bypass недоступен + нет UDP у прокси -> два предупреждения по порядку");
+        v = Session.Evaluate(s2, down, down);
+        Check(v.Error == "Прокси недоступен: таймаут подключения" && v.Warnings.Count == 0, "Evaluate: оба недоступны -> ошибка прокси");
+        var onlyD = new Settings { DirectApps = A(@"C:\q\qbittorrent.exe") };
+        Check(Session.Evaluate(onlyD, null, null).Error == "Порт «Мимо Podkop» не указан", "Evaluate: только «Мимо Podkop», порт не указан -> ошибка");
+        onlyD.DirectPort = 1090;
+        Check(Session.Evaluate(onlyD, null, down).Error == "Порт «Мимо Podkop» недоступен: таймаут подключения", "Evaluate: только «Мимо Podkop», порт недоступен -> ошибка");
+        Check(Session.Evaluate(onlyD, null, noUdp).Warnings.SequenceEqual(new[] {
+                "UDP через порт «Мимо Podkop» не работает: игры и голосовая связь в этих программах могут не заработать." }),
+            "Evaluate: нет UDP у bypass -> предупреждение");
+        var noPort = new Settings { Apps = A(@"C:\a\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe") };
+        Check(Session.Evaluate(noPort, ok, null).Warnings.SequenceEqual(new[] { "Порт «Мимо Podkop» не указан: программы из этого списка идут обычным путём." }),
+            "Evaluate: порт не указан при программах в списке -> предупреждение");
+        noPort.DirectApps[0].Enabled = false;
+        Check(Session.Evaluate(noPort, ok, null).Warnings.Count == 0, "Evaluate: программы «Мимо Podkop» выключены -> про порт молчим");
+    }
+
     static List<string> CfgApps(string path)
     {
         var rules = Arr(Obj(JsonNode.Parse(File.ReadAllText(path))!["route"])["rules"]);
@@ -570,7 +610,8 @@ static class Program
                 ss.Speed += sp => { lock (speeds) speeds.Add(sp); };
                 bool done = ss.ConnectAsync().Wait(2000);
                 Check(done && ss.State == ConnState.Connected && fb.Starts == 1 && ss.UdpOk == true && File.Exists(cfg) &&
-                      ss.Error == null && ss.ConnectedSince != null, "Session: успешное подключение");
+                      ss.Error == null && ss.ConnectedSince != null && ss.Warnings.Count == 0 && ss.Live == new Exits(true, false),
+                      "Session: успешное подключение");
                 var ca = Obj(Obj(JsonNode.Parse(File.ReadAllText(cfg))!["experimental"])["clash_api"]);
                 var secret = Str(ca["secret"]) ?? "";
                 Check(secret.Length == 32 && secret.All(Uri.IsHexDigit) && Str(ca["external_controller"])!.StartsWith("127.0.0.1:"),
@@ -752,6 +793,67 @@ static class Program
                 Thread.Sleep(150);
                 Check(ss.State == ConnState.Connected && fb.Starts == 1 && CfgApps(cfg).Contains("Discord.exe"),
                     "Session: изменение списка во время проверки попадает в конфиг");
+            }
+            {
+                var fb = new FakeSingBox();
+                var cfg = NewCfg();
+                using var ss = new Session(Both(), fb, cfg, (ip, port) => port == 1090 ? Up(ip, port) : DownProbe(ip, port), Delay);
+                ss.ConnectAsync().Wait(2000);
+                var rules = Arr(Obj(JsonNode.Parse(File.ReadAllText(cfg))!["route"])["rules"]);
+                Check(ss.State == ConnState.Connected && ss.Live == new Exits(false, true) && ss.Warnings.Count == 1 && ss.UdpOk == null
+                    && AppRule(rules, "proxy") == null && AppRule(rules, "bypass") != null,
+                    "Session: прокси недоступен, bypass жив -> подключено с предупреждением, в конфиге только bypass");
+            }
+            {
+                var fb = new FakeSingBox();
+                using var ss = new Session(Both(), fb, NewCfg(), DownProbe, Delay);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Disconnected && ss.Error == "Прокси недоступен: таймаут подключения" && fb.Starts == 0 && ss.Warnings.Count == 0,
+                    "Session: оба выхода недоступны -> ошибка, sing-box не запускается");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Both();
+                s.DirectApps.Clear();
+                var cfg = NewCfg();
+                var bypassUp = false;
+                var probed = new List<int>();
+                using var ss = new Session(s, fb, cfg, (ip, port) =>
+                {
+                    lock (probed) probed.Add(port);
+                    return port == 1090 && !Volatile.Read(ref bypassUp) ? DownProbe(ip, port) : Up(ip, port);
+                }, Delay);
+                ss.ConnectAsync().Wait(2000);
+                bool firstNoBypass = !probed.Contains(1090); // список «Мимо Podkop» пуст: его порт не проверяется
+                s.DirectApps = A(@"C:\q\qbittorrent.exe");   // как App: новый список целиком
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                bool warned = ss.Warnings.Any(w => w.StartsWith("Порт «Мимо Podkop» недоступен"));
+                Volatile.Write(ref bypassUp, true);
+                s.Apps = A(@"C:\a\chrome.exe", @"C:\b\Game.exe");
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                var rules = Arr(Obj(JsonNode.Parse(File.ReadAllText(cfg))!["route"])["rules"]);
+                Check(firstNoBypass && warned && ss.State == ConnState.Connected && ss.Warnings.Count == 0 && AppRule(rules, "bypass") != null
+                    && fb.Starts == 3, "Session: перезапуск проверяет выходы заново, предупреждения заменяются");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Both();
+                var cfg = NewCfg();
+                using var ss = new Session(s, fb, cfg, Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                var apps = AppListOps.Copy(s.Apps);
+                var direct = AppListOps.Copy(s.DirectApps);
+                AppListOps.Move(direct, apps, @"C:\a\chrome.exe"); // перенос во вкладку «Мимо Podkop» во время работы
+                s.Apps = apps;
+                s.DirectApps = direct;
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                var rules = Arr(Obj(JsonNode.Parse(File.ReadAllText(cfg))!["route"])["rules"]);
+                Check(fb.Starts == 2 && AppRule(rules, "proxy") == null
+                    && Arr(AppRule(rules, "bypass")!["process_name"]).Select(x => Str(x)).OrderBy(x => x).SequenceEqual(new[] { "chrome.exe", "qbittorrent.exe" }),
+                    "Session: перенос программы в другой список во время работы -> перезапуск, она только в новом правиле");
             }
             using (var rn = new ViviTune.Windows.Runner(Path.Combine(root, "нет", "sing-box.exe")))
             {

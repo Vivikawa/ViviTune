@@ -15,10 +15,16 @@ public interface ISingBox
 
 public enum ConnState { Disconnected, Checking, Connected, Restarting }
 
-// Подключение: проверка прокси, запуск/перезапуск sing-box, ошибки, скорость.
+// Итог проверки выходов: какие живы, предупреждения (без префикса), ошибка (ни одного живого выхода с программами),
+// UDP прокси (null, если прокси не жив).
+public sealed record Verdict(Exits Live, IReadOnlyList<string> Warnings, string? Error, bool? UdpOk);
+
+// Подключение: проверка выходов (прокси и «Мимо Podkop»), запуск/перезапуск sing-box, ошибки, скорость.
 // Состояние меняется только под gate; события вызываются вне gate.
 // Start/Stop sing-box идут по одному под ops (ops берётся раньше gate; под gate sing-box не вызывается,
 // поэтому Exited, пришедший из любого потока, не может зависнуть на gate).
+// Проверка выходов (до ~3 с на выход) идёт вне всех блокировок; после неё под ops + gate заново смотрим
+// attempt/ticket и состояние: за это время могли отключить или изменить список.
 // Настройки копируются в потоке вызывающего (ConnectAsync/AppsChanged): живой Settings из фона не читается.
 // Обработчики событий не должны блокироваться на UI-потоке (Post, а не Invoke).
 public sealed class Session : IDisposable
@@ -26,8 +32,13 @@ public sealed class Session : IDisposable
     const string RestartMsg = "Перезапуск sing-box: список приложений изменён";
     const string CrashMsg = "sing-box завершился, прокси не работает";
     const string ReopenMsg = "Перезапустите выбранные приложения: уже открытые соединения остаются прямыми.";
-    const string NoUdpMsg = "ВНИМАНИЕ: UDP через этот прокси не работает: игры и голосовая связь могут не заработать.";
     const string NoAppsMsg = "Отключено: нет включённых приложений";
+    const string WarnPrefix = "ВНИМАНИЕ: ";
+    const string NoUdpWarn = "UDP через этот прокси не работает: игры и голосовая связь могут не заработать.";
+    const string BypassNoUdpWarn = "UDP через порт «Мимо Podkop» не работает: игры и голосовая связь в этих программах могут не заработать.";
+    const string ProxyDownWarn = "Прокси недоступен ({0}): программы «Через прокси» идут обычным путём.";
+    const string BypassDownWarn = "Порт «Мимо Podkop» недоступен ({0}): программы из этого списка идут обычным путём.";
+    const string BypassNoPortWarn = "Порт «Мимо Podkop» не указан: программы из этого списка идут обычным путём.";
 
     readonly Settings settings;
     readonly ISingBox sb;
@@ -42,11 +53,13 @@ public sealed class Session : IDisposable
     ConnState state;
     string? error;
     bool? udpOk;
+    Exits live;                               // выходы, с которыми запущен текущий sing-box
+    IReadOnlyList<string> warnings = [];      // предупреждения последней проверки (список не меняется, только заменяется)
     DateTime? since;
     Settings? latest;   // последний снимок настроек
     Settings? applied;  // снимок, с которым запущен текущий sing-box
     TrafficMeter? meter;
-    int attempt;        // меняется при Connect/Disconnect: устаревшая проверка прокси ничего не запускает
+    int attempt;        // меняется при Connect/Disconnect: устаревшая проверка выходов ничего не запускает
     int ticket;         // номер последнего AppsChanged: перезапуск делает только он
     int epoch;          // меняется при каждом входе в Connected
     bool disposed;
@@ -58,6 +71,8 @@ public sealed class Session : IDisposable
     public ConnState State { get { lock (gate) return state; } }
     public string? Error { get { lock (gate) return error; } }
     public bool? UdpOk { get { lock (gate) return udpOk; } }
+    public IReadOnlyList<string> Warnings { get { lock (gate) return warnings; } }
+    public Exits Live { get { lock (gate) return live; } }
     public DateTime? ConnectedSince { get { lock (gate) return since; } }
 
     public Session(Settings settings, ISingBox singBox, string configPath, Func<string, int, ProbeResult> probe, TimeSpan restartDelay)
@@ -73,7 +88,7 @@ public sealed class Session : IDisposable
 
     public Task ConnectAsync()
     {
-        var snap = Snapshot(settings);
+        var snap = settings.Clone();
         int a = 0;
         lock (gate)
         {
@@ -108,8 +123,8 @@ public sealed class Session : IDisposable
 
     public void AppsChanged()
     {
-        var snap = Snapshot(settings);
-        bool none = snap.ProcessNames().Count == 0, entered = false, schedule = false;
+        var snap = settings.Clone();
+        bool none = Needs(snap) == (false, false), entered = false, schedule = false;
         int t = 0;
         lock (gate)
         {
@@ -146,58 +161,61 @@ public sealed class Session : IDisposable
 
     void Connect(int a)
     {
-        string ip;
-        int port;
-        lock (gate) { ip = latest!.Ip; port = latest.Port; }
-        ProbeResult r;
-        try { r = probe(ip, port); }
-        catch (Exception e) { r = new ProbeResult { Error = e.Message }; }
-
-        string? fail = null;
-        bool restart = false;
-        int t = 0;
-        lock (ops)
+        Settings snap;
+        lock (gate) snap = latest!;
+        while (true)
         {
-            Settings used;
-            lock (gate)
+            var v = CheckExits(snap); // вне блокировок: Disconnect и AppsChanged в это время не ждут
+
+            string? fail = null;
+            bool restart = false;
+            int t = 0;
+            lock (ops)
             {
-                if (a != attempt || state != ConnState.Checking) return; // отключили во время проверки
-                used = latest!;
-                if (!r.Reachable)
-                {
-                    fail = "Прокси недоступен: " + r.Error;
-                    ToDisconnected(fail);
-                }
-            }
-            if (fail == null)
-            {
-                TrafficMeter? m = null;
-                try { m = StartSingBox(used); }
-                catch (Exception e) { fail = "Не удалось запустить: " + e.Message; }
-                bool keep;
+                Settings used;
                 lock (gate)
                 {
-                    keep = a == attempt && state == ConnState.Checking;
-                    if (keep && fail != null) ToDisconnected(fail);
-                    else if (keep)
-                    {
-                        meter = m;
-                        applied = used;
-                        udpOk = r.UdpSupported;
-                        since = DateTime.Now;
-                        restart = !ReferenceEquals(used, latest); // список изменили, пока запускались
-                        if (restart) { state = ConnState.Restarting; t = ++ticket; }
-                        else { state = ConnState.Connected; epoch++; }
-                    }
+                    if (a != attempt || state != ConnState.Checking) return; // отключили во время проверки
+                    used = latest!;
+                    // Список изменили во время проверки. Адрес и порты при подключении не меняются, поэтому итог
+                    // годится и для нового снимка, если непусты те же списки; иначе проверяем выходы заново.
+                    if (Needs(used) != Needs(snap)) { snap = used; continue; }
+                    fail = v.Error;
+                    if (fail != null) ToDisconnected(fail);
                 }
-                if (!keep || fail != null) { m?.Dispose(); sb.Stop(); }
-                if (!keep) return;
+                if (fail == null)
+                {
+                    TrafficMeter? m = null;
+                    try { m = StartSingBox(used, v.Live); }
+                    catch (Exception e) { fail = "Не удалось запустить: " + e.Message; }
+                    bool keep;
+                    lock (gate)
+                    {
+                        keep = a == attempt && state == ConnState.Checking;
+                        if (keep && fail != null) ToDisconnected(fail);
+                        else if (keep)
+                        {
+                            meter = m;
+                            applied = used;
+                            live = v.Live;
+                            warnings = v.Warnings;
+                            udpOk = v.UdpOk;
+                            since = DateTime.Now;
+                            restart = !ReferenceEquals(used, latest); // список изменили, пока запускались
+                            if (restart) { state = ConnState.Restarting; t = ++ticket; }
+                            else { state = ConnState.Connected; epoch++; }
+                        }
+                    }
+                    if (!keep || fail != null) { m?.Dispose(); sb.Stop(); }
+                    if (!keep) return;
+                }
             }
+            if (fail != null) { Raise(false, fail); return; }
+            Raise(false, WithWarnings(ReopenMsg, v));
+            if (restart) ScheduleRestart(t); // перезапуск проверит выходы заново
+            else OnExited(); // sing-box мог упасть сразу после запуска, пока мы были в Checking
+            return;
         }
-        if (fail != null) { Raise(false, fail); return; }
-        Raise(false, ReopenMsg, r.UdpSupported ? null : NoUdpMsg);
-        if (restart) ScheduleRestart(t);
-        else OnExited(); // sing-box мог упасть сразу после запуска, пока мы были в Checking
     }
 
     void ScheduleRestart(int t) =>
@@ -206,41 +224,56 @@ public sealed class Session : IDisposable
     void Restart(int t)
     {
         if (KeepRunning(t)) return;
-        string? fail = null;
+        Settings snap;
+        lock (gate)
+        {
+            if (t != ticket || state != ConnState.Restarting) return; // есть изменение новее или уже отключены
+            snap = latest!;
+        }
+        // Вне блокировок: старый sing-box пока работает, AppsChanged и Disconnect в это время не ждут.
+        var v = CheckExits(snap);
+
+        string? fail = v.Error;
         bool connected = false;
         lock (ops)
         {
-            Settings snap;
             TrafficMeter? old;
             lock (gate)
             {
-                if (t != ticket || state != ConnState.Restarting) return; // есть изменение новее или уже отключены
-                snap = latest!;
-                old = meter;
-                meter = null;
+                // пока проверяли, пришло изменение новее (его перезапуск проверит заново) или отключили
+                if (t != ticket || state != ConnState.Restarting) return;
+                if (fail != null) old = ToDisconnected(fail); // ни одного живого выхода: останавливаем, как Disconnect
+                else { old = meter; meter = null; }
             }
             old?.Dispose();
-            sb.Stop(); // Exited отсюда приходит в Restarting и не считается ошибкой
-            TrafficMeter? m = null;
-            try { m = StartSingBox(snap); }
-            catch (Exception e) { fail = "Не удалось запустить: " + e.Message; }
-            bool keep;
-            lock (gate)
+            sb.Stop(); // Exited отсюда приходит в Restarting или Disconnected и не считается ошибкой
+            if (fail == null)
             {
-                // в Restarting вернуться, пока мы держим ops, нельзя: значит, Disconnect не вызывали
-                keep = state == ConnState.Restarting;
-                if (keep && fail != null) ToDisconnected(fail);
-                else if (keep)
+                TrafficMeter? m = null;
+                try { m = StartSingBox(snap, v.Live); }
+                catch (Exception e) { fail = "Не удалось запустить: " + e.Message; }
+                bool keep;
+                lock (gate)
                 {
-                    meter = m;
-                    applied = snap;
-                    if (t == ticket) { state = ConnState.Connected; epoch++; connected = true; } // иначе впереди ещё перезапуск
+                    // в Restarting вернуться, пока мы держим ops, нельзя: значит, Disconnect не вызывали
+                    keep = state == ConnState.Restarting;
+                    if (keep && fail != null) ToDisconnected(fail);
+                    else if (keep)
+                    {
+                        meter = m;
+                        applied = snap;
+                        live = v.Live;
+                        warnings = v.Warnings;
+                        udpOk = v.UdpOk;
+                        if (t == ticket) { state = ConnState.Connected; epoch++; connected = true; } // иначе впереди ещё перезапуск
+                    }
                 }
+                if (!keep || fail != null) { m?.Dispose(); sb.Stop(); }
+                if (!keep) return;
             }
-            if (!keep || fail != null) { m?.Dispose(); sb.Stop(); }
-            if (!keep) return;
         }
-        Raise(false, RestartMsg, fail);
+        if (fail != null) Raise(false, RestartMsg, fail);
+        else Raise(false, WithWarnings(RestartMsg, v));
         if (connected) OnExited();
     }
 
@@ -260,15 +293,62 @@ public sealed class Session : IDisposable
         return true;
     }
 
-    // Те же имена .exe (без учёта регистра и порядка) — тот же конфиг для правил sing-box.
+    // Те же имена .exe в обоих списках (без учёта регистра и порядка) — те же правила sing-box.
+    // Выходы при этом заново не проверяются.
     static bool SameNames(Settings a, Settings b) =>
-        a.ProcessNames().ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(b.ProcessNames());
+        Same(a.ProcessNames(), b.ProcessNames()) && Same(a.BypassNames(), b.BypassNames());
 
-    TrafficMeter StartSingBox(Settings snap)
+    static bool Same(List<string> a, List<string> b) => a.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(b);
+
+    // Какие списки непусты (включённые программы): «Через прокси» и «Мимо Podkop».
+    static (bool Proxy, bool Bypass) Needs(Settings s) => (s.ProcessNames().Count > 0, s.BypassNames().Count > 0);
+
+    // Проверяет только нужные выходы снимка: прокси (Ip, Port) — при программах «Через прокси», «Мимо Podkop»
+    // (Ip, DirectPort) — при её программах и указанном порте. Оба сразу, до ~3 с каждый: вызывать вне блокировок.
+    Verdict CheckExits(Settings snap)
+    {
+        var (needProxy, needBypass) = Needs(snap);
+        var bypass = needBypass && snap.DirectPort is int dp ? Task.Run(() => SafeProbe(snap.Ip, dp)) : null;
+        var proxy = needProxy ? SafeProbe(snap.Ip, snap.Port) : null;
+        return Evaluate(snap, proxy, bypass?.Result);
+    }
+
+    ProbeResult SafeProbe(string ip, int port)
+    {
+        try { return probe(ip, port); }
+        catch (Exception e) { return new ProbeResult { Error = e.Message }; }
+    }
+
+    // proxy/bypass — null, если этот выход не проверялся. Выход жив, только если его список непуст и он ответил.
+    public static Verdict Evaluate(Settings s, ProbeResult? proxy, ProbeResult? bypass)
+    {
+        var (needProxy, needBypass) = Needs(s);
+        bool proxyLive = needProxy && proxy?.Reachable == true;
+        bool bypassLive = needBypass && s.DirectPort != null && bypass?.Reachable == true;
+        if (!proxyLive && !bypassLive)
+        {
+            var err = needProxy ? "Прокси недоступен: " + proxy?.Error
+                : s.DirectPort == null ? "Порт «Мимо Podkop» не указан"
+                : "Порт «Мимо Podkop» недоступен: " + bypass?.Error;
+            return new Verdict(default, [], err, null);
+        }
+        var w = new List<string>();
+        if (needProxy && !proxyLive) w.Add(string.Format(ProxyDownWarn, proxy?.Error));
+        if (needBypass && s.DirectPort == null) w.Add(BypassNoPortWarn);
+        if (needBypass && s.DirectPort != null && !bypassLive) w.Add(string.Format(BypassDownWarn, bypass?.Error));
+        if (proxyLive && !proxy!.UdpSupported) w.Add(NoUdpWarn);
+        if (bypassLive && !bypass!.UdpSupported) w.Add(BypassNoUdpWarn);
+        return new Verdict(new Exits(proxyLive, bypassLive), w, null, proxyLive ? proxy!.UdpSupported : null);
+    }
+
+    // Строка лога, за ней предупреждения с префиксом.
+    static string?[] WithWarnings(string msg, Verdict v) => [msg, .. v.Warnings.Select(w => WarnPrefix + w)];
+
+    TrafficMeter StartSingBox(Settings snap, Exits exits)
     {
         int port = FreePort();
         var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
-        File.WriteAllText(configPath, ConfigBuilder.Build(snap, port, secret));
+        File.WriteAllText(configPath, ConfigBuilder.Build(snap, port, secret, exits));
         sb.Start(configPath);
         var m = new TrafficMeter(port, secret);
         m.Sample += s => OnSample(m, s);
@@ -319,6 +399,8 @@ public sealed class Session : IDisposable
         state = ConnState.Disconnected;
         error = err;
         udpOk = null;
+        live = default;
+        warnings = [];
         since = null;
         return m;
     }
@@ -331,13 +413,6 @@ public sealed class Session : IDisposable
         if (zeroSpeed)
             lock (speedGate) Speed?.Invoke(new Speed(0, 0));
     }
-
-    static Settings Snapshot(Settings s) => new()
-    {
-        Ip = s.Ip,
-        Port = s.Port,
-        Apps = s.Apps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList()
-    };
 
     static int FreePort()
     {
