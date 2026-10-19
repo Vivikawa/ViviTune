@@ -58,6 +58,14 @@ static class Program
         Check(AppListOps.SameFile(@"C:\Discord\app-1.0.1\Discord.exe", @"D:\x\DISCORD.EXE") && !AppListOps.SameFile(@"C:\Discord\Discord.exe", @"C:\Discord\Update.exe"),
             "AppList.SameFile: по имени файла без учёта регистра, папка не важна");
 
+        var to = new List<AppEntry>();
+        var from = new List<AppEntry> { new() { Path = @"C:\Old\qbittorrent.exe", Enabled = false }, new() { Path = @"C:\a.exe" } };
+        Check(AppListOps.Move(to, from, @"C:\New\QBITTORRENT.EXE") && from.Count == 1 && from[0].Path == @"C:\a.exe"
+            && to.Count == 1 && to[0].Path == @"C:\New\QBITTORRENT.EXE" && to[0].Enabled,
+            "AppList.Move: тот же файл убран из другого списка, добавлен сюда включённым");
+        Check(!AppListOps.Move(to, from, @"c:\new\qbittorrent.exe") && to.Count == 1 && from.Count == 1, "AppList.Move: уже здесь, в другом нет -> false");
+        Check(AppListOps.Move(to, from, @"C:\b.exe") && to.Count == 2, "AppList.Move: нет нигде -> добавлено");
+
         var g = new ClickGuard();
         Check(g.TryAccept(0) && !g.TryAccept(1) && !g.TryAccept(499) && g.TryAccept(500) && !g.TryAccept(999) && g.TryAccept(1000) && g.TryAccept(5000),
             "ClickGuard: второе нажатие в течение 500 мс после принятого не принимается");
@@ -163,6 +171,41 @@ static class Program
         Check(mix.Validate() == "Добавьте хотя бы одно приложение", "Validate: все выключены");
         Check(Settings.ValidateProxy("192.168.1.1", 1818) == null && Settings.ValidateProxy("abc", 1818) == "Некорректный IP"
             && Settings.ValidateProxy("10.0.0.1", 0) == "Порт должен быть от 1 до 65535", "ValidateProxy: только IP и порт");
+
+        File.WriteAllText(p, """{"Ip":"10.0.0.1","Port":1080,"Apps":[{"Path":"C:\\a\\chrome.exe","Enabled":true}]}""");
+        var old = Settings.Load(p);
+        Check(old.DirectPort == null && old.DirectApps.Count == 0 && old.Apps.Count == 1, "Load: v2 без новых полей -> DirectPort null, DirectApps пуст");
+
+        var v3 = new Settings { Port = 1818, DirectPort = 1819, Apps = A(@"C:\a\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe") };
+        v3.DirectApps[0].Enabled = false;
+        v3.Save(p);
+        var v3b = Settings.Load(p);
+        Check(v3b.DirectPort == 1819 && v3b.DirectApps.Count == 1 && v3b.DirectApps[0].Path == @"C:\q\qbittorrent.exe" && !v3b.DirectApps[0].Enabled,
+            "Save/Load v3: DirectPort и DirectApps туда и обратно");
+        File.WriteAllText(p, """{"DirectPort":"abc","DirectApps":[42,"C:\\t.exe"]}""");
+        var odd3 = Settings.Load(p);
+        Check(odd3.DirectPort == null && odd3.DirectApps.Count == 1, "Load: DirectPort не число -> null, элемент DirectApps неизвестного вида пропущен");
+        File.Delete(p);
+
+        var both = new Settings { Apps = A(@"C:\a\chrome.exe"), DirectApps = A(@"D:\CHROME.EXE", @"C:\q\qbittorrent.exe", @"C:\q\QBITTORRENT.exe", @"C:\x\sing-box.exe") };
+        Check(both.BypassNames().SequenceEqual(new[] { "qbittorrent.exe" }),
+            "BypassNames: без дублей и sing-box.exe; имя из «Через прокси» сюда не попадает");
+
+        Check(new Settings { Port = 1818, DirectPort = 1818, Apps = A(@"C:\a.exe") }.Validate() == "Порт «Мимо Podkop» совпадает с портом прокси", "Validate: DirectPort == Port");
+        Check(new Settings { DirectPort = 0, Apps = A(@"C:\a.exe") }.Validate() == "Порт «Мимо Podkop» должен быть от 1 до 65535", "Validate: DirectPort 0");
+        Check(new Settings { DirectPort = 70000, Apps = A(@"C:\a.exe") }.Validate() == "Порт «Мимо Podkop» должен быть от 1 до 65535", "Validate: DirectPort 70000");
+        Check(new Settings { DirectApps = A(@"C:\q\qbittorrent.exe") }.Validate() == null, "Validate: программы только в «Мимо Podkop» -> корректно");
+
+        Check(Settings.ParseOptionalPort("") == null && Settings.ParseOptionalPort("  ") == null && Settings.ParseOptionalPort(null) == null
+            && Settings.ParseOptionalPort(" 1819 ") == 1819 && Settings.ParseOptionalPort("abc") == 0,
+            "ParseOptionalPort: пусто -> null, число -> число, мусор -> 0 (даст ошибку диапазона)");
+
+        var orig = new Settings { DirectPort = 5, Apps = A(@"C:\a.exe"), DirectApps = A(@"C:\b.exe") };
+        var cl = orig.Clone();
+        cl.DirectApps[0].Enabled = false;
+        cl.Apps.Clear();
+        cl.DirectPort = 6;
+        Check(orig.DirectApps[0].Enabled && orig.Apps.Count == 1 && orig.DirectPort == 5, "Clone: глубокая копия");
     }
 
     static void ViewStateTests()

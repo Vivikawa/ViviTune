@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -27,6 +28,8 @@ namespace ViviTune
         public string Ip { get; set; } = "192.168.1.1";
         public int Port { get; set; } = 1818;
         public List<AppEntry> Apps { get; set; } = new List<AppEntry>();
+        public int? DirectPort { get; set; } // порт SOCKS5 «Мимо Podkop»; null — не задан
+        public List<AppEntry> DirectApps { get; set; } = new List<AppEntry>();
 
         // Читает и v1 (Apps: ["путь"]), и v2 (Apps: [{Path, Enabled}]); неизвестные элементы пропускает.
         public static Settings Load(string path)
@@ -40,22 +43,26 @@ namespace ViviTune
                 {
                     if (kv.Key.Equals("Ip", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue iv && iv.TryGetValue<string>(out var ip)) s.Ip = ip;
                     else if (kv.Key.Equals("Port", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue pv && pv.TryGetValue<int>(out var port)) s.Port = port;
-                    else if (kv.Key.Equals("Apps", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonArray arr)
-                    {
-                        foreach (var item in arr)
-                        {
-                            if (item is JsonValue v && v.TryGetValue<string>(out var str)) s.Apps.Add(new AppEntry { Path = str });
-                            else if (item is JsonObject o)
-                            {
-                                try { var e = o.Deserialize(Json.AppEntry); if (e != null) s.Apps.Add(e); }
-                                catch (JsonException) { } // элемент неверного вида: пропускаем
-                            }
-                        }
-                    }
+                    else if (kv.Key.Equals("DirectPort", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue dv && dv.TryGetValue<int>(out var dport)) s.DirectPort = dport;
+                    else if (kv.Key.Equals("Apps", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonArray arr) ReadApps(arr, s.Apps);
+                    else if (kv.Key.Equals("DirectApps", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonArray darr) ReadApps(darr, s.DirectApps);
                 }
                 return s;
             }
             catch { return new Settings(); } // ponytail: нет файла или он битый: молча берём значения по умолчанию
+        }
+
+        static void ReadApps(JsonArray arr, List<AppEntry> into)
+        {
+            foreach (var item in arr)
+            {
+                if (item is JsonValue v && v.TryGetValue<string>(out var str)) into.Add(new AppEntry { Path = str });
+                else if (item is JsonObject o)
+                {
+                    try { var e = o.Deserialize(Json.AppEntry); if (e != null) into.Add(e); }
+                    catch (JsonException) { } // элемент неверного вида: пропускаем
+                }
+            }
         }
 
         public void Save(string path)
@@ -66,7 +73,8 @@ namespace ViviTune
         // null, если всё корректно; иначе текст ошибки для пользователя
         public string? Validate()
         {
-            return ValidateProxy(Ip, Port) ?? (ProcessNames().Count == 0 ? "Добавьте хотя бы одно приложение" : null);
+            return ValidateProxy(Ip, Port) ?? ValidateDirectPort(DirectPort, Port)
+                ?? (ProcessNames().Count + BypassNames().Count == 0 ? "Добавьте хотя бы одно приложение" : null);
         }
 
         // Только адрес прокси (для страницы настроек): null, если IP и порт корректны.
@@ -77,11 +85,44 @@ namespace ViviTune
             return null;
         }
 
+        // Порт «Мимо Podkop» (необязателен): null, если не задан или корректен и не совпадает с портом прокси.
+        public static string? ValidateDirectPort(int? directPort, int port)
+        {
+            if (directPort is not int d) return null;
+            if (d < 1 || d > 65535) return "Порт «Мимо Podkop» должен быть от 1 до 65535";
+            if (d == port) return "Порт «Мимо Podkop» совпадает с портом прокси";
+            return null;
+        }
+
+        // Пусто -> null (не задан); число -> число; мусор -> 0 (ValidateDirectPort выдаст ошибку диапазона).
+        public static int? ParseOptionalPort(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            return int.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : 0;
+        }
+
+        // Глубокая копия: новые списки и новые AppEntry.
+        public Settings Clone() => new Settings
+        {
+            Ip = Ip, Port = Port, DirectPort = DirectPort,
+            Apps = Apps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList(),
+            DirectApps = DirectApps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList()
+        };
+
         // Имена .exe для правил sing-box: без путей, без дублей, без самого sing-box.
-        public List<string> ProcessNames()
+        public List<string> ProcessNames() => Names(Apps);
+
+        // То же для «Мимо Podkop», кроме имён из «Через прокси» (она побеждает).
+        public List<string> BypassNames()
+        {
+            var proxy = ProcessNames();
+            return Names(DirectApps).Where(n => !proxy.Any(p => p.Equals(n, StringComparison.OrdinalIgnoreCase))).ToList();
+        }
+
+        static List<string> Names(List<AppEntry> apps)
         {
             var result = new List<string>();
-            foreach (var app in Apps)
+            foreach (var app in apps)
             {
                 if (!app.Enabled) continue;
                 var path = app.Path;

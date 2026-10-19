@@ -24,6 +24,13 @@ public static class AppListOps
         return true;
     }
 
+    // Перенос между списками: тот же файл убирается из from и добавляется в to (включённым). true — что-то изменилось.
+    public static bool Move(List<AppEntry> to, List<AppEntry> from, string path)
+    {
+        bool removed = from.RemoveAll(a => SameFile(a.Path, path)) > 0;
+        return Add(to, path) | removed;
+    }
+
     public static bool Remove(List<AppEntry> apps, string path) => apps.RemoveAll(a => Same(a.Path, path)) > 0;
 
     // false — такого пути нет или значение то же.
