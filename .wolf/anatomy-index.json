@@ -1,13 +1,13 @@
 {
   "version": 1,
   "meta": {
-    "lastScanned": "2026-10-18T12:45:17.899Z",
-    "fileCount": 16,
+    "lastScanned": "2026-10-18T18:12:19.504Z",
+    "fileCount": 51,
     "hits": 0,
     "misses": 0,
-    "renderedHash": "2012b8105c4f90c7d7f14715c8e9c9d0ed8cdbfdeb430a17dbb991c00f12790c",
-    "storeUpdatedAt": "2026-10-18T12:45:17.908Z",
-    "rootHash": "903d5ea215d9088b"
+    "renderedHash": "07daf1408ca94a8344f65b40400cd8547c7a3796f4537492b64d987bc4111340",
+    "storeUpdatedAt": "2026-10-18T18:12:19.513Z",
+    "rootHash": "a6c896a6f8cba8f3"
   },
   "files": {
     "AGENTS.md": {
@@ -57,29 +57,29 @@
     },
     "src/ViviTune.Tests/Program.cs": {
       "description": "Class: Program",
-      "tokens": 1678,
-      "hash": "8498ade777f84883",
-      "size": 6788,
-      "mtimeMs": 1791135718682.2517,
-      "updatedAt": "2026-10-04T17:41:58.827Z",
+      "tokens": 10579,
+      "hash": "ee41cebb411e2ce5",
+      "size": 43081,
+      "mtimeMs": 1792346940430.3232,
+      "updatedAt": "2026-10-18T18:09:00.565Z",
       "source": "hook"
     },
     "src/ViviTune/Settings.cs": {
-      "description": "Class: Settings",
-      "tokens": 560,
-      "hash": "25375dd6877f5eb8",
-      "size": 2316,
-      "mtimeMs": 1792327517631.386,
-      "updatedAt": "2026-10-18T12:45:17.898Z",
+      "description": "Class: AppEntry",
+      "tokens": 1095,
+      "hash": "f5050f9d4a78ccf1",
+      "size": 4444,
+      "mtimeMs": 1792332543291.2422,
+      "updatedAt": "2026-10-18T14:09:03.478Z",
       "source": "hook"
     },
     "src/ViviTune/ViviTune.csproj": {
       "description": "",
-      "tokens": 166,
-      "hash": "3876adace9b336ed",
-      "size": 620,
-      "mtimeMs": 1791135441473.3948,
-      "updatedAt": "2026-10-04T17:37:21.644Z",
+      "tokens": 488,
+      "hash": "dd560123a3e06546",
+      "size": 1830,
+      "mtimeMs": 1792346738706.6133,
+      "updatedAt": "2026-10-18T18:05:38.839Z",
       "source": "hook"
     },
     ".superpowers/sdd/2026-10-04-vivitune/task-1-report.md": {
@@ -152,6 +152,321 @@
       "size": 7474,
       "mtimeMs": 1792327512841.0176,
       "updatedAt": "2026-10-18T12:45:12.982Z",
+      "source": "hook"
+    },
+    ".superpowers/brainstorm/1397-1792328603/content/layout.html": {
+      "description": "",
+      "tokens": 2015,
+      "hash": "da3da871e0aba2cc",
+      "size": 8327,
+      "mtimeMs": 1792328647552.2825,
+      "updatedAt": "2026-10-18T13:04:07.852Z",
+      "source": "hook"
+    },
+    ".superpowers/brainstorm/1397-1792328603/content/waiting.html": {
+      "description": "",
+      "tokens": 43,
+      "hash": "adec53545da7ff6a",
+      "size": 195,
+      "mtimeMs": 1792328708368.8125,
+      "updatedAt": "2026-10-18T13:05:08.592Z",
+      "source": "hook"
+    },
+    ".superpowers/brainstorm/1397-1792328603/content/apps.html": {
+      "description": "",
+      "tokens": 1492,
+      "hash": "450e084405cb2ec0",
+      "size": 6161,
+      "mtimeMs": 1792328751247.7444,
+      "updatedAt": "2026-10-18T13:05:51.471Z",
+      "source": "hook"
+    },
+    ".superpowers/brainstorm/1397-1792328603/content/playback-1.html": {
+      "description": "",
+      "tokens": 1756,
+      "hash": "5c3e244946f766e7",
+      "size": 6886,
+      "mtimeMs": 1792328798436.3718,
+      "updatedAt": "2026-10-18T13:06:38.658Z",
+      "source": "hook"
+    },
+    "docs/superpowers/specs/2026-10-18-vivitune-avalonia-ui-design.md": {
+      "description": "ViviTune 2 — новый интерфейс на Avalonia (этап 1: Windows)",
+      "tokens": 2885,
+      "hash": "83e23cf0211c1e63",
+      "size": 18524,
+      "mtimeMs": 1792328944877.2124,
+      "updatedAt": "2026-10-18T13:09:05.134Z",
+      "source": "hook"
+    },
+    "docs/superpowers/plans/2026-10-18-vivitune-avalonia-ui.md": {
+      "description": "ViviTune 2 (Avalonia UI, этап 1: Windows) Implementation Plan",
+      "tokens": 6516,
+      "hash": "888d3d66486ea991",
+      "size": 34564,
+      "mtimeMs": 1792329332074.8152,
+      "updatedAt": "2026-10-18T13:15:32.232Z",
+      "source": "hook"
+    },
+    ".superpowers/sdd/2026-10-18-vivitune-avalonia-ui/task-1-report.md": {
+      "description": "Task 1 report",
+      "tokens": 688,
+      "hash": "c86361ff67c25a2f",
+      "size": 2762,
+      "mtimeMs": 1792330152762.339,
+      "updatedAt": "2026-10-18T13:29:13.030Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Session.cs": {
+      "description": "Class: Session",
+      "tokens": 3205,
+      "hash": "0eea8af890af97f6",
+      "size": 13523,
+      "mtimeMs": 1792346833060.0269,
+      "updatedAt": "2026-10-18T18:07:13.204Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Windows/Runner.cs": {
+      "description": "Class: Runner",
+      "tokens": 1233,
+      "hash": "4d483a776fc8f6f1",
+      "size": 4788,
+      "mtimeMs": 1792346727766.3772,
+      "updatedAt": "2026-10-18T18:05:27.901Z",
+      "source": "hook"
+    },
+    ".superpowers/sdd/2026-10-18-vivitune-avalonia-ui/task-5-report.md": {
+      "description": "Task 5 report: Session (connection state, restart, errors)",
+      "tokens": 2409,
+      "hash": "f117292bcca0ba5b",
+      "size": 10556,
+      "mtimeMs": 1792331505842.5085,
+      "updatedAt": "2026-10-18T13:51:46.046Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Windows/ProcessCatalog.cs": {
+      "description": "Class: ProcessCatalog",
+      "tokens": 747,
+      "hash": "259c2f4629a07b3a",
+      "size": 2872,
+      "mtimeMs": 1792346904862.3083,
+      "updatedAt": "2026-10-18T18:08:25.139Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/ViewState.cs": {
+      "description": "Class: ViewState",
+      "tokens": 2434,
+      "hash": "e567809075c6eb03",
+      "size": 10166,
+      "mtimeMs": 1792344923510.848,
+      "updatedAt": "2026-10-18T17:35:23.657Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/Theme.axaml": {
+      "description": "",
+      "tokens": 2143,
+      "hash": "8462edea2b28fd54",
+      "size": 8320,
+      "mtimeMs": 1792333122999.3784,
+      "updatedAt": "2026-10-18T14:18:43.190Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/App.axaml": {
+      "description": "",
+      "tokens": 141,
+      "hash": "083e0c2b9c8158ac",
+      "size": 528,
+      "mtimeMs": 1792332778561.2952,
+      "updatedAt": "2026-10-18T14:12:58.766Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/App.axaml.cs": {
+      "description": "Class: App",
+      "tokens": 1702,
+      "hash": "a35a89bbfc4b3506",
+      "size": 7115,
+      "mtimeMs": 1792344928972.4783,
+      "updatedAt": "2026-10-18T17:35:29.112Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/MainWindow.axaml": {
+      "description": "",
+      "tokens": 689,
+      "hash": "a6ca4f342eb14f8f",
+      "size": 2610,
+      "mtimeMs": 1792332795633.941,
+      "updatedAt": "2026-10-18T14:13:15.862Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/MainWindow.axaml.cs": {
+      "description": "Class: MainWindow",
+      "tokens": 197,
+      "hash": "d156f37ea0c22c30",
+      "size": 796,
+      "mtimeMs": 1792332796293.8718,
+      "updatedAt": "2026-10-18T14:13:16.465Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/HomePage.axaml": {
+      "description": "",
+      "tokens": 1732,
+      "hash": "eb376b924cee92ba",
+      "size": 6732,
+      "mtimeMs": 1792334354819.243,
+      "updatedAt": "2026-10-18T14:39:15.008Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/HomePage.axaml.cs": {
+      "description": "Class: HomePage",
+      "tokens": 158,
+      "hash": "17f163fb10131a3a",
+      "size": 699,
+      "mtimeMs": 1792346854527.0405,
+      "updatedAt": "2026-10-18T18:07:34.682Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/AppsPage.axaml": {
+      "description": "",
+      "tokens": 2288,
+      "hash": "39eedba5d6c625a9",
+      "size": 9153,
+      "mtimeMs": 1792344797493.2932,
+      "updatedAt": "2026-10-18T17:33:17.636Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/AppsPage.axaml.cs": {
+      "description": "Class: AppsPage",
+      "tokens": 1471,
+      "hash": "6c9839d819150288",
+      "size": 6180,
+      "mtimeMs": 1792346894008,
+      "updatedAt": "2026-10-18T18:08:14.154Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/LogPage.axaml": {
+      "description": "",
+      "tokens": 320,
+      "hash": "41837aa15223f2ef",
+      "size": 1211,
+      "mtimeMs": 1792332812008.0747,
+      "updatedAt": "2026-10-18T14:13:32.195Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/LogPage.axaml.cs": {
+      "description": "Class: LogPage",
+      "tokens": 235,
+      "hash": "115da54dcd2543dd",
+      "size": 1010,
+      "mtimeMs": 1792332829279.0054,
+      "updatedAt": "2026-10-18T14:13:49.461Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/SettingsPage.axaml": {
+      "description": "",
+      "tokens": 463,
+      "hash": "c07e5ef482a50dbe",
+      "size": 1822,
+      "mtimeMs": 1792332918551.09,
+      "updatedAt": "2026-10-18T14:15:18.745Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/SettingsPage.axaml.cs": {
+      "description": "Class: SettingsPage",
+      "tokens": 349,
+      "hash": "b62c54ca1618d64e",
+      "size": 1455,
+      "mtimeMs": 1792333628960.9092,
+      "updatedAt": "2026-10-18T14:27:09.121Z",
+      "source": "hook"
+    },
+    "src/ViviTune.Shots/ViviTune.Shots.csproj": {
+      "description": "",
+      "tokens": 135,
+      "hash": "585ed91dcfd637eb",
+      "size": 503,
+      "mtimeMs": 1792332857507.0984,
+      "updatedAt": "2026-10-18T14:14:17.724Z",
+      "source": "hook"
+    },
+    "src/ViviTune.Shots/Program.cs": {
+      "description": "Class: Program",
+      "tokens": 1770,
+      "hash": "8ff0f2a6dc3f35e7",
+      "size": 7431,
+      "mtimeMs": 1792344980293.9717,
+      "updatedAt": "2026-10-18T17:36:20.433Z",
+      "source": "hook"
+    },
+    ".superpowers/sdd/2026-10-18-vivitune-avalonia-ui/task-7-report.md": {
+      "description": "Task 7 report: window shell (theme, ViewState, sidebar, Log, Settings, Session wiring, Shots)",
+      "tokens": 2339,
+      "hash": "a64ffab9d62e66d1",
+      "size": 9882,
+      "mtimeMs": 1792333175551.0117,
+      "updatedAt": "2026-10-18T14:19:35.729Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/Sparkline.cs": {
+      "description": "Class: Sparkline",
+      "tokens": 1174,
+      "hash": "72fa79cfc0ed8893",
+      "size": 4740,
+      "mtimeMs": 1792334077771.908,
+      "updatedAt": "2026-10-18T14:34:37.950Z",
+      "source": "hook"
+    },
+    ".superpowers/sdd/2026-10-18-vivitune-avalonia-ui/task-8-report.md": {
+      "description": "Task 8 report: Главная — кнопка, статус, скорость с графиками",
+      "tokens": 2325,
+      "hash": "2e6d0e9a8585bf01",
+      "size": 9983,
+      "mtimeMs": 1792334611075.1177,
+      "updatedAt": "2026-10-18T14:43:31.308Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/AppListOps.cs": {
+      "description": "Список приложений из Settings: пути сравниваются без учёта регистра. Без Avalonia (тестируется отдел",
+      "tokens": 490,
+      "hash": "055b1f74bf71034f",
+      "size": 2175,
+      "mtimeMs": 1792346888487.7798,
+      "updatedAt": "2026-10-18T18:08:08.643Z",
+      "source": "hook"
+    },
+    ".superpowers/sdd/2026-10-18-vivitune-avalonia-ui/task-9-report.md": {
+      "description": "Task 9 report: Приложения — список, переключатели, добавление из запущенных",
+      "tokens": 3101,
+      "hash": "7a46fab2c5fdb659",
+      "size": 13320,
+      "mtimeMs": 1792345092640.8625,
+      "updatedAt": "2026-10-18T17:38:12.780Z",
+      "source": "hook"
+    },
+    "src/ViviTune/TrafficMeter.cs": {
+      "description": "Class: TrafficMath",
+      "tokens": 1138,
+      "hash": "2cd70e08bb7875aa",
+      "size": 4393,
+      "mtimeMs": 1792346733232.993,
+      "updatedAt": "2026-10-18T18:05:33.372Z",
+      "source": "hook"
+    },
+    "src/ViviTune/Ui/ClickGuard.cs": {
+      "description": "Повторное нажатие в течение 500 мс после принятого не принимается: двойной клик не попадает",
+      "tokens": 125,
+      "hash": "6995e3841759c608",
+      "size": 599,
+      "mtimeMs": 1792346849053.1755,
+      "updatedAt": "2026-10-18T18:07:29.205Z",
+      "source": "hook"
+    },
+    ".superpowers/sdd/2026-10-18-vivitune-avalonia-ui/final-fix-report.md": {
+      "description": "Final whole-branch review: fix report",
+      "tokens": 2762,
+      "hash": "bc5b6cde1116035e",
+      "size": 12616,
+      "mtimeMs": 1792347139371.0405,
+      "updatedAt": "2026-10-18T18:12:19.503Z",
       "source": "hook"
     }
   },

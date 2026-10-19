@@ -15,8 +15,8 @@
       "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
       "id": "bug-001",
       "timestamp": "2026-10-04T17:39:33.798Z",
-      "last_seen": "2026-10-04T17:39:33.798Z",
-      "occurrences": 1,
+      "last_seen": "2026-10-18T18:04:44.422Z",
+      "occurrences": 3,
       "related_bugs": []
     },
     {
@@ -33,8 +33,8 @@
       "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
       "id": "bug-002",
       "timestamp": "2026-10-04T17:41:58.917Z",
-      "last_seen": "2026-10-04T17:41:58.917Z",
-      "occurrences": 1,
+      "last_seen": "2026-10-18T14:32:58.591Z",
+      "occurrences": 2,
       "related_bugs": []
     },
     {
@@ -90,6 +90,675 @@
       "last_seen": "2026-10-18T12:45:17.990Z",
       "occurrences": 1,
       "related_bugs": []
+    },
+    {
+      "error_message": "Incorrect value in code",
+      "file": "src/ViviTune.Tests/Program.cs",
+      "root_cause": "Had \"Session: выключено последнее приложение\"",
+      "fix": "Changed to \"Session: выключено последнее приложение во время ",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-006",
+      "timestamp": "2026-10-18T13:45:49.974Z",
+      "last_seen": "2026-10-18T13:45:49.974Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Wrong reference: IDisposable should be ISingBox",
+      "file": "src/ViviTune/Windows/Runner.cs",
+      "root_cause": "Used \"IDisposable\" instead of \"ISingBox\"",
+      "fix": "Changed IDisposable → ISingBox",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-007",
+      "timestamp": "2026-10-18T13:46:55.748Z",
+      "last_seen": "2026-10-18T13:46:55.748Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Incorrect value in code",
+      "file": "src/ViviTune/Windows/ProcessCatalog.cs",
+      "root_cause": "Had ') + \"",
+      "fix": "Changed to '\\\\'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-008",
+      "timestamp": "2026-10-18T14:01:28.308Z",
+      "last_seen": "2026-10-18T14:01:28.308Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Wrong reference: Windows should be Ui",
+      "file": "src/ViviTune.Tests/Program.cs",
+      "root_cause": "Used \"Windows\" instead of \"Ui\"",
+      "fix": "Changed Windows → Ui",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-009",
+      "timestamp": "2026-10-18T14:08:44.805Z",
+      "last_seen": "2026-10-18T14:08:44.805Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Null/undefined access in Settings.cs",
+      "file": "src/ViviTune/Settings.cs",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-010",
+      "timestamp": "2026-10-18T14:09:03.575Z",
+      "last_seen": "2026-10-18T14:09:03.575Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Incorrect value in code",
+      "file": "src/ViviTune/Ui/SettingsPage.axaml",
+      "root_cause": "Had \"520\"",
+      "fix": "Changed to \"460\"",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "axaml"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-011",
+      "timestamp": "2026-10-18T14:15:18.849Z",
+      "last_seen": "2026-10-18T14:15:18.849Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Button with Classes=\"accent\" renders solid accent color instead of the gradient Background",
+      "file": "src/ViviTune/Ui/Theme.axaml",
+      "root_cause": "Avalonia Fluent theme has a built-in Button .accent class that sets PART_ContentPresenter Background to AccentButtonBackground (palette Accent), overriding Button.Background",
+      "fix": "Renamed our class to Button.primary (gradient) so it does not collide with Fluent's accent class",
+      "tags": [
+        "avalonia",
+        "fluent",
+        "styles",
+        "axaml"
+      ],
+      "status": "fixed",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-012",
+      "timestamp": "2026-10-18T14:18:21.000Z",
+      "last_seen": "2026-10-18T14:18:21.000Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Missing guard clause",
+      "file": "src/ViviTune/Ui/ViewState.cs",
+      "root_cause": "No early return/throw for edge case: ip == Ip && port == Port",
+      "fix": "Added guard clause: if (ip == Ip && port == Port)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-013",
+      "timestamp": "2026-10-18T14:27:05.277Z",
+      "last_seen": "2026-10-18T14:27:05.277Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "settings.json rewritten on every startup (SettingsPage filling guard ineffective)",
+      "file": "src/ViviTune/Ui/SettingsPage.axaml.cs",
+      "root_cause": "Avalonia 12 TextBox.TextChanged is raised asynchronously after the text changes, so the bool 'filling' guard was already false when the fill's TextChanged ran; Push -> RequestSetProxy -> App saved settings unconditionally",
+      "fix": "ViewState.RequestSetProxy skips the event when ip/port equal current Ip/Port (App keeps them equal to Settings); removed the filling flag; test pins it",
+      "tags": [
+        "avalonia",
+        "textbox",
+        "async-event",
+        "settings"
+      ],
+      "status": "fixed",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-014",
+      "timestamp": "2026-10-18T14:27:51.000Z",
+      "last_seen": "2026-10-18T14:27:51.000Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Wrong condition in logic",
+      "file": "src/ViviTune/Ui/ViewState.cs",
+      "root_cause": "Condition was: if (Set(ref state, value)",
+      "fix": "Changed to: if (!Set(ref state, value)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-015",
+      "timestamp": "2026-10-18T14:33:21.299Z",
+      "last_seen": "2026-10-18T14:33:21.299Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Null/undefined access in App.axaml.cs",
+      "file": "src/ViviTune/Ui/App.axaml.cs",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-016",
+      "timestamp": "2026-10-18T14:35:44.374Z",
+      "last_seen": "2026-10-18T14:35:44.374Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Significant refactor of Program.cs",
+      "file": "src/ViviTune.Shots/Program.cs",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 17→43 lines (2 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-017",
+      "timestamp": "2026-10-18T14:36:16.281Z",
+      "last_seen": "2026-10-18T14:36:16.281Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Power button glow (BoxShadow on template Border) hard-clipped to the Button's 142x142 box: visible square edge around the halo",
+      "file": "src/ViviTune/Ui/HomePage.axaml",
+      "root_cause": "In Avalonia 12 the Button (custom ControlTheme) clips its content to its bounds, so a BoxShadow drawn outside the button is cut off",
+      "fix": "Setter ClipToBounds=False in the PowerButton ControlTheme; glow now fades out naturally (checked on cropped PNG)",
+      "tags": [
+        "avalonia",
+        "boxshadow",
+        "clip",
+        "axaml"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-018",
+      "timestamp": "2026-10-18T14:39:10.597Z",
+      "last_seen": "2026-10-18T14:39:10.597Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Incorrect value in code",
+      "file": "src/ViviTune/Ui/HomePage.axaml",
+      "root_cause": "Had \"460\"",
+      "fix": "Changed to \"540\"",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "axaml"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-019",
+      "timestamp": "2026-10-18T14:39:15.132Z",
+      "last_seen": "2026-10-18T14:39:15.132Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Missing error handling in ViewState.cs",
+      "file": "src/ViviTune/Ui/ViewState.cs",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-020",
+      "timestamp": "2026-10-18T17:28:14.455Z",
+      "last_seen": "2026-10-18T17:28:14.455Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Significant refactor of ViewState.cs",
+      "file": "src/ViviTune/Ui/ViewState.cs",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 12→38 lines (3 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-021",
+      "timestamp": "2026-10-18T17:28:19.287Z",
+      "last_seen": "2026-10-18T17:28:19.287Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Missing error handling in App.axaml.cs",
+      "file": "src/ViviTune/Ui/App.axaml.cs",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-022",
+      "timestamp": "2026-10-18T17:30:36.505Z",
+      "last_seen": "2026-10-18T17:30:36.505Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Significant refactor of Program.cs",
+      "file": "src/ViviTune.Shots/Program.cs",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 3→9 lines (2 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-023",
+      "timestamp": "2026-10-18T17:31:24.061Z",
+      "last_seen": "2026-10-18T17:31:24.061Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Incorrect value in code",
+      "file": "src/ViviTune/Ui/AppsPage.axaml",
+      "root_cause": "Had \" Text=\"",
+      "fix": "Changed to \" Width=\"",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "axaml"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-024",
+      "timestamp": "2026-10-18T17:32:41.417Z",
+      "last_seen": "2026-10-18T17:32:41.417Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Incorrect value in code",
+      "file": "src/ViviTune/Ui/AppsPage.axaml",
+      "root_cause": "Had \"16\"",
+      "fix": "Changed to \"20\"",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "axaml"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-025",
+      "timestamp": "2026-10-18T17:32:47.023Z",
+      "last_seen": "2026-10-18T17:32:47.023Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Incorrect value in code",
+      "file": "src/ViviTune/Ui/AppsPage.axaml",
+      "root_cause": "Had \"M10.5 3h3v18h-3z M3 10.5h18v3H3z\"",
+      "fix": "Changed to \"M10.5 3h3v7.5H21v3h-7.5V21h-3v-7.5H3v-3h7.5z\"",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "axaml"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-026",
+      "timestamp": "2026-10-18T17:33:17.739Z",
+      "last_seen": "2026-10-18T17:33:17.739Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Wrong reference: Headless should be Controls",
+      "file": "src/ViviTune.Shots/Program.cs",
+      "root_cause": "Used \"Headless\" instead of \"Controls\"",
+      "fix": "Changed Headless → Controls",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-027",
+      "timestamp": "2026-10-18T17:34:11.911Z",
+      "last_seen": "2026-10-18T17:34:11.911Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Missing guard clause",
+      "file": "src/ViviTune/Ui/App.axaml.cs",
+      "root_cause": "No early return/throw for edge case: rows.Count == 0",
+      "fix": "Added guard clause: if (rows.Count == 0)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-028",
+      "timestamp": "2026-10-18T17:35:29.208Z",
+      "last_seen": "2026-10-18T17:35:29.208Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "PathIcon plus sign rendered with a hole in the middle (two overlapping rectangles)",
+      "file": "src/ViviTune/Ui/AppsPage.axaml",
+      "root_cause": "Avalonia path mini-language defaults to FillRule EvenOdd: the overlap of two subpaths is not filled",
+      "fix": "Draw the plus as one outline polygon (or prefix the data with F1 for NonZero)",
+      "tags": [
+        "avalonia",
+        "pathicon",
+        "geometry",
+        "fillrule",
+        "ui"
+      ],
+      "status": "confirmed",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-029",
+      "timestamp": "2026-10-18T17:36:57.000Z",
+      "last_seen": "2026-10-18T17:36:57.000Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Wrong reference: return should be NoAppsMsg",
+      "file": "src/ViviTune/Session.cs",
+      "root_cause": "Used \"return\" instead of \"NoAppsMsg\"",
+      "fix": "Changed return → NoAppsMsg",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-030",
+      "timestamp": "2026-10-18T18:06:12.142Z",
+      "last_seen": "2026-10-18T18:06:12.142Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Significant refactor of Session.cs",
+      "file": "src/ViviTune/Session.cs",
+      "root_cause": "4 lines replaced/restructured",
+      "fix": "Rewrote 22→17 lines (4 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-031",
+      "timestamp": "2026-10-18T18:06:54.072Z",
+      "last_seen": "2026-10-18T18:06:54.072Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Wrong condition in logic",
+      "file": "src/ViviTune/Ui/AppsPage.axaml.cs",
+      "root_cause": "Condition was: if (sender is not Control { DataContext: AppRow r } ||)",
+      "fix": "Changed to: if (sender is not Control { DataContext: AppRow r } ||)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-032",
+      "timestamp": "2026-10-18T18:07:45.657Z",
+      "last_seen": "2026-10-18T18:07:45.657Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Wrong condition in logic",
+      "file": "src/ViviTune/Ui/AppsPage.axaml.cs",
+      "root_cause": "Condition was: if (sender is Control { DataContext: AppRow r })",
+      "fix": "Changed to: if (sender is Control { DataContext: AppRow r } && rem)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-033",
+      "timestamp": "2026-10-18T18:07:51.278Z",
+      "last_seen": "2026-10-18T18:07:51.278Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Null/undefined access in AppListOps.cs",
+      "file": "src/ViviTune/Ui/AppListOps.cs",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-034",
+      "timestamp": "2026-10-18T18:08:08.737Z",
+      "last_seen": "2026-10-18T18:08:08.737Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Wrong condition in logic",
+      "file": "src/ViviTune/Windows/ProcessCatalog.cs",
+      "root_cause": "Condition was: if (skip.Contains(path)",
+      "fix": "Changed to: if (string.Equals(path, self, StringComparison.Ordinal)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "cs"
+      ],
+      "status": "candidate",
+      "observed_worktree": "D:\\backup\\Downloads\\ViviTune",
+      "id": "bug-035",
+      "timestamp": "2026-10-18T18:08:25.244Z",
+      "last_seen": "2026-10-18T18:08:25.244Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Runner: after a failed Process.Start, Running throws InvalidOperationException (disposed Process); UI stuck in Checking/Restarting",
+      "file": "src/ViviTune/Windows/Runner.cs",
+      "root_cause": "Start disposed the old _p before p.Start(); on throw _p kept pointing to the disposed Process",
+      "fix": "_p = null right after Dispose, before p.Start()",
+      "tags": [
+        "runner",
+        "process",
+        "dispose",
+        "final-review"
+      ],
+      "status": "fixed",
+      "id": "bug-036",
+      "timestamp": "2026-10-18T18:11:06.000Z",
+      "last_seen": "2026-10-18T18:11:06.000Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Speed stays 0 when Windows has a manual system proxy",
+      "file": "src/ViviTune/TrafficMeter.cs",
+      "root_cause": "new HttpClient() uses the system proxy, requests to 127.0.0.1 Clash API may go through it",
+      "fix": "HttpClient(new SocketsHttpHandler { UseProxy = false })",
+      "tags": [
+        "httpclient",
+        "proxy",
+        "traffic",
+        "final-review"
+      ],
+      "status": "fixed",
+      "id": "bug-037",
+      "timestamp": "2026-10-18T18:11:06.000Z",
+      "last_seen": "2026-10-18T18:11:06.000Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Double click removes/adds the next row or connects then disconnects",
+      "file": "src/ViviTune/Ui/AppsPage.axaml.cs",
+      "root_cause": "list shifts after the first click; power toggle has no debounce",
+      "fix": "ClickGuard.TryAccept(TickCount64): 500 ms per button kind",
+      "tags": [
+        "ui",
+        "debounce",
+        "avalonia",
+        "final-review"
+      ],
+      "status": "fixed",
+      "id": "bug-038",
+      "timestamp": "2026-10-18T18:11:06.000Z",
+      "last_seen": "2026-10-18T18:11:06.000Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "sing-box restarts (drops calls) on list changes that do not change rules",
+      "file": "src/ViviTune/Session.cs",
+      "root_cause": "AppsChanged always scheduled a restart while connected",
+      "fix": "compare ProcessNames() of new snapshot vs applied (running) snapshot; skip in AppsChanged (Connected) and KeepRunning in Restart",
+      "tags": [
+        "session",
+        "restart",
+        "sing-box",
+        "final-review"
+      ],
+      "status": "fixed",
+      "id": "bug-039",
+      "timestamp": "2026-10-18T18:11:06.000Z",
+      "last_seen": "2026-10-18T18:11:06.000Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Updated app at a new path shown as new / added as a second row",
+      "file": "src/ViviTune/Ui/AppListOps.cs",
+      "root_cause": "already-added check by full path only",
+      "fix": "SameFile by file name: Filter + ProcessCatalog exclude by name, Add replaces Path in place",
+      "tags": [
+        "apps",
+        "path",
+        "update",
+        "final-review"
+      ],
+      "status": "fixed",
+      "id": "bug-040",
+      "timestamp": "2026-10-18T18:11:06.000Z",
+      "last_seen": "2026-10-18T18:11:06.000Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Silent disconnect when the last enabled app is turned off",
+      "file": "src/ViviTune/Session.cs",
+      "root_cause": "Disconnect() raised no log line",
+      "fix": "Disconnect(NoAppsMsg) logs \"Отключено: нет включённых приложений\"",
+      "tags": [
+        "session",
+        "log",
+        "final-review"
+      ],
+      "status": "fixed",
+      "id": "bug-041",
+      "timestamp": "2026-10-18T18:11:06.000Z",
+      "last_seen": "2026-10-18T18:11:06.000Z",
+      "occurrences": 1,
+      "related_bugs": []
+    },
+    {
+      "error_message": "Settings shows ViviTune 1.0.0",
+      "file": "src/ViviTune/ViviTune.csproj",
+      "root_cause": "no <Version> in csproj",
+      "fix": "<Version>2.0.0</Version>",
+      "tags": [
+        "version",
+        "csproj",
+        "final-review"
+      ],
+      "status": "fixed",
+      "id": "bug-042",
+      "timestamp": "2026-10-18T18:11:06.000Z",
+      "last_seen": "2026-10-18T18:11:06.000Z",
+      "occurrences": 1,
+      "related_bugs": []
     }
   ],
   "applied_observations": {
@@ -97,7 +766,37 @@
     "d79276f3-547c-4a5c-85b7-3da09297e213": true,
     "ef71a1c9-2b37-4782-8a7e-56fc7bc9dbde": true,
     "d945afaf-111a-4e07-860f-27a339f403c2": true,
-    "3bdebe10-96b7-4b2f-ba67-41467c87b108": true
+    "3bdebe10-96b7-4b2f-ba67-41467c87b108": true,
+    "79888543-dac2-4ef8-bfb4-5c59a3e71220": true,
+    "167945f5-4367-4459-b536-58dfa80b965c": true,
+    "54c77bb0-788c-4294-b8ef-a97fa700bac1": true,
+    "b61685dc-351b-4183-a285-8488fe01ac19": true,
+    "ee0598f8-0cda-4bcf-a9aa-4e99e65cd942": true,
+    "96117e9d-7909-4dc0-8af4-683dffffb500": true,
+    "afee5470-2585-4d67-af57-3a24dda4ea4b": true,
+    "d93d3356-5f37-4695-9742-4c3c47fbc11c": true,
+    "ec7bc8dc-5bbe-4f43-99a0-01fed3edd89f": true,
+    "4b00c835-312d-4fd9-b761-77607711ba9e": true,
+    "3ba1e3c3-4a22-4530-bb01-41b318657a8b": true,
+    "3953f609-bab3-46e0-9be8-22c90b349c7d": true,
+    "38460a67-0f3e-4f95-8614-1b8a7eee42e7": true,
+    "c5b7dc64-6834-4c90-b6be-11aa6b980e78": true,
+    "dde836a4-0c0e-48a1-b1cb-ae3b11fb3495": true,
+    "d1a9dc5e-71f6-4882-a8f7-9d6da204692d": true,
+    "8c8c372a-2031-4938-ad25-ff12426bbf9d": true,
+    "1696a86e-90a2-4e21-be3c-c5bae9e0dc92": true,
+    "8d8a1697-5f13-4ac9-bc5e-42ae1d79adb5": true,
+    "5faa156c-5481-4c0b-9f07-368d13a71ae7": true,
+    "71fcf930-5a70-431e-ab01-544bc5267ec9": true,
+    "ffd0803c-2006-47a3-9610-7fc4772dd30d": true,
+    "ce4b65cf-bcd7-4d68-9b54-8ac3e803cc32": true,
+    "fbb17c7c-06da-4378-96af-b4dfc103e4c4": true,
+    "c28e4146-93bf-4b89-8fbd-823d25cd0645": true,
+    "d22d9a09-c1e4-4b32-ba9f-3ea9611fb0e5": true,
+    "8bcc87c0-0c2a-4b9e-88d9-9f017ad2c162": true,
+    "4a42c13c-44e6-4c20-b3a8-1ed7f88d388a": true,
+    "ed1d195a-37ac-41ed-9b69-21f1d2a6b5f6": true,
+    "070b36a8-1dd2-4518-9ee7-64e3979e1a03": true
   },
-  "next_id": 6
+  "next_id": 43
 }

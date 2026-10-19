@@ -4,35 +4,33 @@ budget_tokens: 1000
 ---
 # STATUS — ViviTune
 
-> Read this FIRST when resuming. Last updated: 2026-10-18
+> Read this FIRST when resuming. Last updated: 2026-10-19
 
 ## ✅ Done
 
-- v1 built and **works in practice** (user-confirmed 2026-10-18): Discord (voice + stream, i.e. UDP) and a browser go through the router SOCKS5 `192.168.1.1:1818` (Podkop), other apps stay direct.
-- Design: `docs/superpowers/specs/2026-10-04-vivitune-design.md`; plan: `docs/superpowers/plans/2026-10-04-vivitune.md`.
-- Code in `src/ViviTune` (WinForms, net48, C# 7.3): `Settings.cs` (settings.json, validation, process names), `ConfigBuilder.cs` (sing-box 1.12.12 config: TUN v4+v6, `process_name` -> `proxy`, final `direct`, proxy-dns over **tcp**, log level `warn`), `ProxyProbe.cs` (SOCKS5 + UDP ASSOCIATE check, never throws, IPv6 ok), `Runner.cs` (sing-box in a Job Object, kill-on-close), `MainForm.cs`/`Program.cs` (UI, single-instance mutex, admin manifest).
-- Tests: `src/ViviTune.Tests` (console `Check`, 22 ok) -> `dotnet run --project src/ViviTune.Tests`.
-- Git initialised on 2026-10-04, branch `main`, 8 commits (d11201f..e084243). Reviewed per task + whole branch; two review fix rounds done.
+- v1 (WinForms, net48) on `main`: works in practice (Discord voice + stream through router SOCKS5 `192.168.1.1:1818`, Podkop).
+- **ViviTune 2, stage 1 (Windows)** on branch `avalonia-ui`, user-confirmed working 2026-10-19:
+  - .NET 10 + Avalonia 12.1.4, sidebar UI à la Hiddify: Главная (power button, `TCP + UDP`/`только TCP`, proxied speed + sparklines, per-connection traffic total «всего …»), Приложения (switches, add from running programs or .exe), Лог, Настройки.
+  - Core: `Settings` (v1 + v2 format, JSON via source-gen `JsonCtx`), `ConfigBuilder` (+ `experimental.clash_api`), `TrafficMeter` (Clash API `/connections`, proxy chains only), `Session` (state machine, debounced restarts), `Windows/Runner` (Job Object), `Windows/ProcessCatalog`.
+  - Publish: single-file, self-contained, trimmed + compressed: `ViviTune.exe` 23.3 MB + `sing-box.exe` 1.12.12 (37 MB) alongside; app icon `src/ViviTune/Assets/icon.ico`.
+  - Tests: 104 ok, also under a trimmed publish of `ViviTune.Tests`. Elevated lifecycle harness passed on a545696 (Stop and hard kill leave no sing-box, no `172.19.0.x` routes).
+- Spec `docs/superpowers/specs/2026-10-18-vivitune-avalonia-ui-design.md`, plan `docs/superpowers/plans/2026-10-18-vivitune-avalonia-ui.md`.
 
 ## 🚀 Next quest
 
-**Goal:** nothing required; v1 is complete and verified. Optional polish only.
+**Goal:** stage 2 — Linux (Arch) build of ViviTune 2.
+- Needs a brainstorm/spec first: Linux replacements for `Windows/` (Runner without Job Object, process list + icons, admin rights instead of the UAC manifest, TUN permissions), `Path.GetFileName` on Windows-style paths, packaging.
+- Acceptance: same UI and Session on Arch; per-app proxy works for the user's apps.
+- Open decisions for the user: how to get root (pkexec/sudo/capabilities), packaging (AUR/AppImage/tarball).
 
-Verified 2026-10-18 (elevated lifecycle harness on Runner/ConfigBuilder, no GUI): after `Stop()` and after a hard-killed parent, `sing-box.exe` is gone, TUN adapter gone, no `172.19.0.x` routes, internet works. Polish commit 688dcc9 fixed: log scroll jump, old `Process` disposal, `_stopping` on failed kill, ponytail trivia.
-
-Remaining minors (static review; no leaks found, GUI not profiled):
-- Win32 return values in `Runner` unchecked; `Exited` can race form close (`UI()` check-then-`BeginInvoke`).
-- Fixed 96-DPI layout (no AutoScale).
-- GUI itself (button flow, mutex, log trimming) only verified by the user's manual use, no automated UI test.
-
-Open decisions for the user: none. Out of scope by design: tray, autostart, profiles, proxy login/password, domain rules, sing-box auto-update.
+Parked minors (from reviews): «Перезапуск…» may flash ~1 s in a rare sequence; the app toggle switch has no click guard; picking an unrelated exe with the same file name replaces the row's path.
 
 ## Context
 
-- Build: `dotnet build src/ViviTune -c Release` -> `src/ViviTune/bin/Release/net48/ViviTune.exe` (needs admin/UAC). `sing-box.exe` 1.12.12 is in git-ignored `src/ViviTune/third_party/` (re-download from the SagerNet v1.12.12 release; copied next to the exe on build).
-- .NET SDK 8.0.425 was installed via winget for this; config check: `sing-box.exe check -c <config.json>`.
-- Matching is by exe file name; already-open connections stay direct until the app is restarted. Rulings made on the user's behalf are in the final-review notes: warn log + 500-line cap, DNS over tcp (spec edited).
-- Untracked tooling dirs (`.claude`, `.codex`, `.cursor`, `.opencode`, `.wolf`, `AGENTS.md`) are OpenWolf scaffolding, not part of the app.
+- Branch `avalonia-ui` awaits the merge decision into `main` (no git remote). v1 stays on `main` until then.
+- Build/test: `dotnet run --project src/ViviTune.Tests`; screenshots `dotnet run --project src/ViviTune.Shots -- artifacts/shots`; publish `dotnet publish src/ViviTune -c Release -o artifacts/publish` (keeps `settings.json` there; v1 cannot read v2 settings).
+- `sing-box.exe` 1.12.12 lives in git-ignored `src/ViviTune/third_party/`; staying on 1.12.12 on purpose (see cerebrum Decision Log). Every `JsonSerializer` call must go through `JsonCtx` (trimming).
+- .NET SDK 10.0.402 installed; GUI runs need admin (UAC), so lifecycle checks use an elevated scratch harness.
 
 ## 📚 References
 
