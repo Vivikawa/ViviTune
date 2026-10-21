@@ -26,7 +26,55 @@ static class Program
         CatalogTests();
         ViewStateTests();
         AppListTests();
+        VlessLinkTests();
         return failures == 0 ? 0 : 1;
+    }
+
+    static void VlessLinkTests()
+    {
+        const string U = "3f1c0a52-0000-4000-8000-000000000001";
+        var r = VlessServer.Parse($"  vless://{U}@nl.example.com:443?security=reality&sni=www.microsoft.com&pbk=PUBKEY&sid=ab12&type=tcp&flow=xtls-rprx-vision#%F0%9F%87%B3%F0%9F%87%B1%20Amsterdam\r\n", out var e);
+        Check(r != null && e == null, "Vless: Reality-ссылка разбирается без ошибки");
+        Check(r?.Uuid == U && r.Host == "nl.example.com" && r.Port == 443, "Vless: uuid, хост, порт");
+        Check(r?.Security == "reality" && r.Transport == "tcp" && r.Flow == "xtls-rprx-vision", "Vless: security, transport, flow");
+        Check(r?.Sni == "www.microsoft.com" && r.Fingerprint == "chrome" && r.PublicKey == "PUBKEY" && r.ShortId == "ab12", "Vless: sni, fp по умолчанию chrome, pbk, sid");
+        Check(r?.Name == "🇳🇱 Amsterdam", "Vless: имя из фрагмента");
+        Check(r?.Summary == "nl.example.com:443 · Reality · TCP · Vision", "Vless: Summary Reality");
+
+        var w = VlessServer.Parse($"vless://{U}@1.2.3.4:8443?security=tls&type=ws&host=cdn.example.com&path=%2Fws%3Fed%3D2048&fp=firefox&alpn=h2,http/1.1", out _);
+        Check(w?.Sni == "cdn.example.com" && w.HostHeader == "cdn.example.com", "Vless: sni берётся из host");
+        Check(w?.Path == "/ws?ed=2048" && w.Fingerprint == "firefox", "Vless: path раскодирован, fp");
+        Check(w != null && w.Alpn.SequenceEqual(new[] { "h2", "http/1.1" }), "Vless: alpn списком");
+        Check(w?.Summary == "1.2.3.4:8443 · TLS · WebSocket", "Vless: Summary TLS WebSocket");
+
+        var g = VlessServer.Parse($"vless://{U}@h.example.com:443?security=tls&type=grpc&serviceName=gun&sni=s.example.com", out _);
+        Check(g?.Transport == "grpc" && g.ServiceName == "gun" && g.Sni == "s.example.com", "Vless: grpc и serviceName");
+        Check(VlessServer.Parse($"vless://{U}@h.example.com:443?type=httpupgrade&host=a.com&path=/u", out _)?.Transport == "httpupgrade", "Vless: httpupgrade");
+        Check(VlessServer.Parse($"vless://{U}@h.example.com:443?type=http&host=a.com&path=/p", out _)?.Transport == "http", "Vless: http");
+        Check(VlessServer.Parse($"vless://{U}@h.example.com:443?type=h2", out _)?.Transport == "http", "Vless: h2 -> http");
+        Check(VlessServer.Parse($"vless://{U}@h.example.com:443?type=raw", out _)?.Transport == "tcp", "Vless: raw -> tcp");
+
+        var n = VlessServer.Parse($"vless://{U}@h.example.com:80", out _);
+        Check(n?.Security == "none" && n.Sni == null && n.Fingerprint == null && n.Name == "h.example.com", "Vless: без TLS, sni/fp null, имя = хост");
+        Check(n?.Summary == "h.example.com:80 · без TLS · TCP", "Vless: Summary без TLS");
+
+        var v6 = VlessServer.Parse($"vless://{U}@[2001:db8::1]:443?security=tls&sni=a.com", out _);
+        Check(v6?.Host == "2001:db8::1" && v6.Summary == "[2001:db8::1]:443 · TLS · TCP", "Vless: IPv6 без скобок в Host, со скобками в Summary");
+
+        void Err(string? link, string want, string name)
+        {
+            var x = VlessServer.Parse(link, out var er);
+            Check(x == null && er == want, "Vless: ошибка - " + name);
+        }
+        Err("", "Вставьте VLESS-ссылку в настройках", "пусто");
+        Err(null, "Вставьте VLESS-ссылку в настройках", "null");
+        Err("https://x", "Ссылка должна начинаться с vless://", "схема");
+        Err("vless://@h:443", "В ссылке нет UUID", "нет UUID");
+        Err($"vless://{U}@h.example.com?security=tls", "В ссылке нет порта сервера", "нет порта");
+        Err($"vless://{U}@h.example.com:443?type=xhttp", "XHTTP не поддерживается: sing-box 1.12 его не умеет", "xhttp");
+        Err($"vless://{U}@h.example.com:443?type=kcp", "Неизвестный тип транспорта: kcp", "kcp");
+        Err($"vless://{U}@h.example.com:443?security=reality", "Для Reality в ссылке нужен pbk", "reality без pbk");
+        Err($"vless://{U}@h.example.com:443?flow=xtls-rprx-direct", "Неизвестный flow: xtls-rprx-direct", "flow");
     }
 
     static void AppListTests()
