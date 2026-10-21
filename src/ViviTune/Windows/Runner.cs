@@ -25,7 +25,7 @@ namespace ViviTune.Windows
         public void Start(string configPath)
         {
             if (!File.Exists(_exe)) throw new FileNotFoundException("Не найден sing-box.exe рядом с программой", _exe);
-            var psi = new ProcessStartInfo(_exe, "run -c \"" + configPath + "\"")
+            var psi = new ProcessStartInfo(_exe, "run --disable-color -c \"" + configPath + "\"") // без ANSI: лог показываем и копируем как текст
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,

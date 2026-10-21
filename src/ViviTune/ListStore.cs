@@ -3,7 +3,10 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace ViviTune
@@ -51,9 +54,41 @@ namespace ViviTune
             return new ListsResult(files, ids.Where(failed.Contains).ToList(), ids.Where(stale.Contains).ToList());
         }
 
-        public static byte[] Download(string id)
+        // Как Prepare, но качает через VLESS-сервер (провайдер может резать или тормозить GitHub), не вышло — напрямую.
+        // Временный sing-box (sb, без TUN) запускается, только если какой-то список надо скачать, и останавливается здесь же.
+        public static ListsResult PrepareVia(string dir, IReadOnlyList<string> ids, ISingBox sb, string vlessLink, IPAddress server, DateTime nowUtc)
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            Directory.CreateDirectory(dir);
+            int port = Session.FreePort();
+            var cfg = Path.Combine(dir, $"fetch-{port}.json"); // со своим портом: два вызова подряд не делят файл
+            var tunnel = new Lazy<IWebProxy>(() => // исключение кэшируется: не поднялся — все списки сразу напрямую
+            {
+                File.WriteAllText(cfg, ConfigBuilder.BuildFetch(vlessLink, server, port));
+                sb.Start(cfg);
+                for (var end = DateTime.UtcNow.AddSeconds(3); ; Thread.Sleep(50))
+                    try { using var c = new TcpClient(); c.Connect(IPAddress.Loopback, port); break; }
+                    catch (SocketException) when (DateTime.UtcNow < end) { }
+                return new WebProxy("http://127.0.0.1:" + port);
+            });
+            try
+            {
+                return Prepare(dir, ids, id =>
+                {
+                    try { return Download(id, tunnel.Value); }
+                    catch { return Download(id); }
+                }, nowUtc);
+            }
+            finally
+            {
+                sb.Stop();
+                try { File.Delete(cfg); } catch { } // в нём ключ VLESS
+            }
+        }
+
+        // proxy null — системный, как у браузера.
+        public static byte[] Download(string id, IWebProxy? proxy = null)
+        {
+            using var http = new HttpClient(new HttpClientHandler { Proxy = proxy }) { Timeout = TimeSpan.FromSeconds(15) };
             return http.GetByteArrayAsync(Catalogs.ListUrl(id)).GetAwaiter().GetResult();
         }
     }

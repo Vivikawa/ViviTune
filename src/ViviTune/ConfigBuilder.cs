@@ -91,9 +91,43 @@ namespace ViviTune
             var lists = Catalogs.Lists.Where(l => listFiles.ContainsKey(l.Id)).Select(l => l.Id).ToArray();
             if (names.Length == 0 && lists.Length == 0)
                 throw new InvalidOperationException("Нет правил: ни одной программы и ни одного списка");
-            var v = VlessServer.Parse(s.VlessLink, out _)!;
             var cidr = server + (server.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32");
+            var proxy = VlessOutbound(s.VlessLink, server);
 
+            var rules = new List<object>
+            {
+                D("action", "sniff"),
+                D("protocol", "dns", "action", "hijack-dns"),
+                D("ip_cidr", new object[] { cidr }, "outbound", "direct")
+            };
+            if (names.Length > 0) rules.Add(D("process_name", names, "outbound", "proxy"));
+            if (lists.Length > 0) rules.Add(D("rule_set", lists, "outbound", "proxy"));
+
+            // весь DNS компьютера — к 1.1.1.1 через туннель: провайдер его не видит и не подменяет.
+            // Только IPv4: у многих VLESS-серверов нет IPv6, и соединение к AAAA-адресу молча глохнет (голос Discord).
+            // ponytail: IPv6-литералы без DNS всё ещё уходят в IPv6; опция «есть IPv6», если найдётся сервер с ним
+            var config = Head(apiPort, apiSecret);
+            config["dns"] = D("servers", new object[] { D("type", "tcp", "tag", "dns", "server", "1.1.1.1", "detour", "proxy") }, "final", "dns", "strategy", "ipv4_only");
+            config["inbounds"] = Tun(true);
+            config["outbounds"] = new object[] { proxy, D("type", "direct", "tag", "direct") };
+            var route = D("rules", rules.ToArray(), "final", "direct", "auto_detect_interface", true, "default_domain_resolver", "dns");
+            if (lists.Length > 0)
+                route["rule_set"] = lists.Select(id => (object)D("type", "local", "tag", id, "format", "binary", "path", listFiles[id])).ToArray();
+            config["route"] = route;
+            return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
+        }
+
+        // Временный sing-box, чтобы скачать списки через VLESS-сервер (провайдер может резать GitHub):
+        // только локальный HTTP/SOCKS-прокси на 127.0.0.1:port, без TUN — системный трафик не трогает.
+        public static string BuildFetch(string vlessLink, IPAddress server, int port) => JsonSerializer.Serialize(D(
+            "log", D("level", "warn"),
+            "inbounds", new object[] { D("type", "mixed", "tag", "in", "listen", "127.0.0.1", "listen_port", port) },
+            "outbounds", new object[] { VlessOutbound(vlessLink, server) }), Json.DictionaryStringObject);
+
+        // Outbound "proxy" по ссылке vless:// к уже разрешённому IP сервера.
+        static Dictionary<string, object> VlessOutbound(string vlessLink, IPAddress server)
+        {
+            var v = VlessServer.Parse(vlessLink, out var linkError) ?? throw new InvalidOperationException(linkError);
             var proxy = D("type", "vless", "tag", "proxy", "server", server.ToString(), "server_port", v.Port, "uuid", v.Uuid);
             if (!string.IsNullOrEmpty(v.Flow)) proxy["flow"] = v.Flow;
             proxy["packet_encoding"] = "xudp";
@@ -136,26 +170,7 @@ namespace ViviTune
                 }
                 proxy["transport"] = tr;
             }
-
-            var rules = new List<object>
-            {
-                D("action", "sniff"),
-                D("protocol", "dns", "action", "hijack-dns"),
-                D("ip_cidr", new object[] { cidr }, "outbound", "direct")
-            };
-            if (names.Length > 0) rules.Add(D("process_name", names, "outbound", "proxy"));
-            if (lists.Length > 0) rules.Add(D("rule_set", lists, "outbound", "proxy"));
-
-            // весь DNS компьютера — к 1.1.1.1 через туннель: провайдер его не видит и не подменяет
-            var config = Head(apiPort, apiSecret);
-            config["dns"] = D("servers", new object[] { D("type", "tcp", "tag", "dns", "server", "1.1.1.1", "detour", "proxy") }, "final", "dns");
-            config["inbounds"] = Tun(true);
-            config["outbounds"] = new object[] { proxy, D("type", "direct", "tag", "direct") };
-            var route = D("rules", rules.ToArray(), "final", "direct", "auto_detect_interface", true, "default_domain_resolver", "dns");
-            if (lists.Length > 0)
-                route["rule_set"] = lists.Select(id => (object)D("type", "local", "tag", id, "format", "binary", "path", listFiles[id])).ToArray();
-            config["route"] = route;
-            return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
+            return proxy;
         }
     }
 }

@@ -5,7 +5,10 @@
              x:Class="ViviTune.Ui.LogPage"
              x:DataType="ui:ViewState">
   <Grid RowDefinitions="Auto,*" Margin="24,18,24,24">
-    <TextBlock Classes="title" Text="Лог" />
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock Classes="title" Text="Лог" />
+      <Button Grid.Column="1" Classes="flat" Content="Копировать" Click="OnCopy" IsEnabled="{Binding !!LogLines.Count}" />
+    </Grid>
     <Border Grid.Row="1" Classes="card" Margin="0,14,0,0" Padding="0">
       <Panel>
         <ScrollViewer Name="Scroll" Padding="16,12" HorizontalScrollBarVisibility="Disabled">

@@ -1,4 +1,7 @@
+using System;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
 
 namespace ViviTune.Ui
@@ -23,6 +26,14 @@ namespace ViviTune.Ui
             }
             else if (e.OffsetDelta.Y != 0) // прокрутил пользователь
                 stick = Scroll.Offset.Y >= Scroll.Extent.Height - Scroll.Viewport.Height - 4;
+        }
+
+        // Весь лог одним текстом. Буфер обмена может держать другая программа: тогда строка в лог, не падение.
+        async void OnCopy(object? sender, RoutedEventArgs e)
+        {
+            if (DataContext is not ViewState s || TopLevel.GetTopLevel(this)?.Clipboard is not { } clip) return;
+            try { await clip.SetTextAsync(string.Join(Environment.NewLine, s.LogLines)); }
+            catch (Exception ex) { s.AddLog("Не удалось скопировать: " + ex.Message); }
         }
     }
 }

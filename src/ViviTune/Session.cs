@@ -20,7 +20,7 @@ public sealed class VlessDeps
 {
     public required Func<string, IPAddress?> Resolve { get; init; }        // имя -> IP; null — не нашлось
     public required Func<IPAddress, int, string?> Reach { get; init; }     // TCP до сервера: null — ответил, иначе причина
-    public required Func<IReadOnlyList<string>, ListsResult> PrepareLists { get; init; }
+    public required Func<IReadOnlyList<string>, string, IPAddress, ListsResult> PrepareLists { get; init; } // (id списков, ссылка vless://, IP сервера)
     // после запуска sing-box: (порт Clash API, секрет, отмена) -> null или текст ошибки для пользователя
     public required Func<int, string, CancellationToken, string?> AfterStart { get; init; }
 }
@@ -408,7 +408,7 @@ public sealed class Session : IDisposable
         var lists = new ListsResult(new Dictionary<string, string>(), [], []);
         if (snap.Lists.Count > 0)
         {
-            try { lists = vless.PrepareLists(snap.Lists); }
+            try { lists = vless.PrepareLists(snap.Lists, snap.VlessLink, ip); }
             catch { lists = lists with { Failed = snap.Lists.ToList() }; } // не смогли даже начать: ни один не скачался
         }
         foreach (var id in lists.Stale) Log?.Invoke($"Список {ListName(id)} не обновился, работаю со старой копией");
@@ -507,7 +507,7 @@ public sealed class Session : IDisposable
             lock (speedGate) Speed?.Invoke(new Speed(0, 0));
     }
 
-    static int FreePort()
+    internal static int FreePort()
     {
         var l = new TcpListener(IPAddress.Loopback, 0);
         l.Start();

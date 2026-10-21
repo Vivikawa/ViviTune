@@ -51,6 +51,10 @@ static class Program
                 int calls = 0;
                 var r = ListStore.Prepare(dir, new[] { "fresh" }, id => { Interlocked.Increment(ref calls); return good; }, now);
                 Check(calls == 0 && r.Files["fresh"] == P("fresh") && r.Failed.Count == 0 && r.Stale.Count == 0, "ListStore: свежая копия не скачивается");
+                var sb = new FakeSingBox();
+                var rv = ListStore.PrepareVia(dir, new[] { "fresh" }, sb, "", IPAddress.Loopback, now);
+                Check(sb.Starts == 0 && rv.Files["fresh"] == P("fresh") && Directory.GetFiles(dir, "fetch-*").Length == 0,
+                    "ListStore: всё свежее — временный sing-box не запускается");
             }
             {
                 Seed("upd", true);
@@ -156,6 +160,7 @@ static class Program
         Check(dq.Count == 1 && Str(d0["type"]) == "tcp" && Str(d0["tag"]) == "dns" && Str(d0["server"]) == "1.1.1.1" && Str(d0["detour"]) == "proxy"
             && Str(Obj(c["dns"])["final"]) == "dns" && Str(Obj(c["route"])["default_domain_resolver"]) == "dns"
             && !Obj(c["dns"]).ToJsonString().Contains("\"type\":\"local\""), "VLESS DNS: один сервер 1.1.1.1 по tcp через proxy, нет local");
+        Check(Str(Obj(c["dns"])["strategy"]) == "ipv4_only", "VLESS DNS: только IPv4 (у сервера может не быть IPv6)");
 
         var onlyLists = Arr(Obj(V(reality, files)["route"])["rules"]);
         Check(IndexOfRule(onlyLists, "process_name") < 0 && IndexOfRule(onlyLists, "rule_set") >= 0, "VLESS: только списки, нет process_name");
@@ -165,6 +170,12 @@ static class Program
         bool threw = false;
         try { V(reality, new Dictionary<string, string>()); } catch (InvalidOperationException) { threw = true; }
         Check(threw, "VLESS: нет программ и списков -> исключение");
+
+        var fe = JsonNode.Parse(ConfigBuilder.BuildFetch(reality, srv, 18080))!.AsObject();
+        var fin = Obj(Arr(fe["inbounds"])[0]);
+        Check(Str(fin["type"]) == "mixed" && Str(fin["listen"]) == "127.0.0.1" && (int)fin["listen_port"]! == 18080
+            && Arr(fe["outbounds"]).Count == 1 && Arr(fe["outbounds"])[0]!.ToJsonString() == ob.ToJsonString()
+            && !fe.ContainsKey("dns") && !fe.ContainsKey("route"), "VLESS fetch: только mixed на 127.0.0.1 и тот же outbound, без TUN");
 
         SingBoxCheck(reality, wsLink, srv);
     }
@@ -205,6 +216,8 @@ static class Program
                 var cfg = Path.Combine(tmp, name + ".json");
                 File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", srv, f));
                 Check(Run("check", "-c", cfg) == 0, "sing-box check: " + name);
+                File.WriteAllText(cfg, ConfigBuilder.BuildFetch(link, srv, 18080));
+                Check(Run("check", "-c", cfg) == 0, "sing-box check: fetch " + name);
             }
         }
         finally { try { Directory.Delete(tmp, true); } catch { } }
@@ -1737,7 +1750,7 @@ sealed class FakeVless
         {
             Resolve = host => { Interlocked.Increment(ref Resolves); return resolve?.Invoke(host); },
             Reach = (ip, port) => { Interlocked.Increment(ref Reaches); return reach?.Invoke(ip, port); },
-            PrepareLists = ids =>
+            PrepareLists = (ids, _, _) =>
             {
                 Interlocked.Increment(ref Prepares);
                 lock (Prepared)
