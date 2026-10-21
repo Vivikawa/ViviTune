@@ -514,6 +514,16 @@ static class Program
         var forms = new (int, string)[] { (1, "1 приложение"), (2, "2 приложения"), (5, "5 приложений"), (11, "11 приложений"), (12, "12 приложений"), (21, "21 приложение"), (22, "22 приложения"), (25, "25 приложений"), (111, "111 приложений"), (112, "112 приложений") };
         Check(forms.All(f => Format.Plural(f.Item1, "приложение", "приложения", "приложений") == f.Item2), "Format.Plural: русские формы");
 
+        var ad = new ViewState();
+        bool? toDirect = null;
+        ad.AddAppRequested += (_, d) => toDirect = d;
+        ad.DirectTab = true;
+        ad.RequestAddApp(@"C:x.exe");
+        bool socksDirect = toDirect == true;
+        ad.Mode = ProxyMode.Vless;
+        ad.RequestAddApp(@"C:x.exe");
+        Check(socksDirect && toDirect == false, "ViewState.RequestAddApp: в VLESS приложение всегда в Apps");
+
         var l = new ViewState();
         Check(l.ListGroups.Count == Catalogs.Groups.Count && l.ListGroups.Sum(g => g.Rows.Count) == Catalogs.Lists.Count, "ViewState: ListGroups из каталога");
         var rows = l.ListGroups.SelectMany(g => g.Rows).ToDictionary(r => r.Id);

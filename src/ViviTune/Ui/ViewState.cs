@@ -269,7 +269,7 @@ public sealed class ViewState : INotifyPropertyChanged
     }
 
     public void RequestToggle() => ToggleRequested?.Invoke();
-    public void RequestAddApp(string path) => AddAppRequested?.Invoke(path, directTab);
+    public void RequestAddApp(string path) => AddAppRequested?.Invoke(path, directTab && !IsVless); // в VLESS «Сайты» — не список программ: всё в Apps
     public void RequestRemoveApp(string path) => RemoveAppRequested?.Invoke(path);
     public void RequestSetAppEnabled(string path, bool enabled) => SetAppEnabledRequested?.Invoke(path, enabled);
     // Ip/Port/DirectPort здесь — то, что сейчас в Settings (App держит их вместе). Без изменений события нет:
