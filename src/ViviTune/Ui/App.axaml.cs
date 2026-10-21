@@ -42,7 +42,8 @@ namespace ViviTune.Ui
                 PrepareLists = ids => ListStore.Prepare(Path.Combine(dir, "lists"), ids, ListStore.Download, DateTime.UtcNow),
                 AfterStart = (p, s, d, ct) => VlessProbe.AfterStart(p, s, d, ct) ?? Flush()
             });
-            static string? Flush() { Native.FlushDns(); return null; }
+            // Очистка кэша DNS — по возможности: экспорт недокументирован, его сбой не должен ронять запуск.
+            static string? Flush() { try { Native.FlushDns(); } catch { } return null; }
             var state = new ViewState
             {
                 Ip = settings.Ip,
