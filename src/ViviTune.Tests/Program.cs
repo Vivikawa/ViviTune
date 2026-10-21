@@ -232,7 +232,7 @@ static class Program
         Check(b.Mode == ProxyMode.Vless && b.VlessLink == Link && b.Doh == "dnssb" && b.Lists.SequenceEqual(new[] { "youtube", "telegram" }),
             "Settings v4: туда и обратно");
 
-        File.WriteAllText(p, """{"Mode":"vless","Doh":"google","Lists":["youtube","nope","YOUTUBE",5]}""");
+        File.WriteAllText(p, """{"Mode":"vless","Doh":"adguard","Lists":["youtube","nope","YOUTUBE",5]}""");
         var d = Settings.Load(p);
         Check(d.Mode == ProxyMode.Vless && d.Doh == "quad9" && d.Lists.SequenceEqual(new[] { "youtube" }), "Settings v4: мусор в Mode/Doh/Lists отфильтрован");
         File.Delete(p);
@@ -249,9 +249,8 @@ static class Program
 
     static void CatalogsTests()
     {
-        Check(Catalogs.Doh.Count == 8, "Catalogs: 8 серверов DoH");
-        string[] banned = { "1.1.1.1", "cloudflare", "dns.google", "8.8.8.8" };
-        Check(Catalogs.Doh.All(x => !banned.Any(w => x.Url.Contains(w, StringComparison.OrdinalIgnoreCase))), "Catalogs: в DoH нет Cloudflare и Google");
+        Check(Catalogs.Doh.Count == 10 && Catalogs.Doh.Select(d => d.Id).Distinct().Count() == 10, "Catalogs: 10 серверов DoH, id уникальны");
+        Check(Catalogs.DohById("cloudflare").Label == "Cloudflare · 1.1.1.1" && Catalogs.DohById("google").Label == "Google · 8.8.8.8", "Catalogs: Cloudflare и Google по IP");
         Check(Catalogs.DohById("x").Id == "quad9" && Catalogs.DohById(null).Id == "quad9", "Catalogs: неизвестный DoH -> quad9");
         Check(Catalogs.DohById("quad9").Label == "Quad9 · 9.9.9.9", "Catalogs: Label по хосту из Url");
         Check(Catalogs.Lists.Count == 25 && Catalogs.Lists.Select(l => l.Id).Distinct().Count() == 25, "Catalogs: 25 уникальных списков");

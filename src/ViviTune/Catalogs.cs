@@ -16,7 +16,8 @@ namespace ViviTune
 
     public static class Catalogs
     {
-        // Без Cloudflare и Google (анти-цель): порядок — как в выпадающем списке.
+        // Порядок — как в выпадающем списке. Cloudflare и Google в конце: DoH идёт внутри VPN, а НСДИ перехватывает
+        // обычный DNS по UDP, до шифрованного запроса через туннель ему не добраться.
         public static IReadOnlyList<DohServer> Doh { get; } = new DohServer[]
         {
             new("quad9", "Quad9", "https://9.9.9.9/dns-query"),
@@ -27,6 +28,8 @@ namespace ViviTune
             new("switch", "SWITCH", "https://dns.switch.ch/dns-query"),
             new("appliedprivacy", "Applied Privacy", "https://doh.applied-privacy.net/query"),
             new("cira", "CIRA Private", "https://private.canadianshield.cira.ca/dns-query"),
+            new("cloudflare", "Cloudflare", "https://1.1.1.1/dns-query"),
+            new("google", "Google", "https://8.8.8.8/dns-query"),
         };
 
         public static IReadOnlyList<string> Groups { get; } = new[] { "Страны", "Категории", "Сервисы", "Хостинги" };
