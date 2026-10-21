@@ -30,10 +30,15 @@ namespace ViviTune
                 try
                 {
                     var data = download(id);
-                    if (data.Length < 3 || data[0] != 0x53 || data[1] != 0x52 || data[2] != 0x53) throw new InvalidDataException("не SRS");
-                    var tmp = path + ".tmp";
-                    File.WriteAllBytes(tmp, data);
-                    File.Move(tmp, path, overwrite: true);
+                    if (data.Length < 4 || data[0] != 0x53 || data[1] != 0x52 || data[2] != 0x53) throw new InvalidDataException("не SRS");
+                    if (data[3] > 3) throw new InvalidDataException("версия SRS новее поддерживаемой sing-box 1.12.12");
+                    var tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                    try
+                    {
+                        File.WriteAllBytes(tmp, data);
+                        File.Move(tmp, path, overwrite: true);
+                    }
+                    catch { try { File.Delete(tmp); } catch { } throw; }
                     files[id] = path;
                 }
                 catch

@@ -77,6 +77,14 @@ static class Program
                       r2.Failed.Contains("hn") && !File.Exists(P("hn")), "ListStore: не SRS отвергается");
             }
             {
+                var newer = new byte[] { 0x53, 0x52, 0x53, 4, 1 };
+                Seed("vs", true);
+                var r1 = ListStore.Prepare(dir, new[] { "vs" }, id => newer, now);
+                var r2 = ListStore.Prepare(dir, new[] { "vn" }, id => newer, now);
+                Check(r1.Stale.Contains("vs") && File.ReadAllBytes(P("vs")).SequenceEqual(old) &&
+                      r2.Failed.Contains("vn") && !File.Exists(P("vn")), "ListStore: версия SRS новее 3 отвергается");
+            }
+            {
                 var r = ListStore.Prepare(dir, new[] { "a", "b", "c" }, id => good, now);
                 Check(r.Files.Count == 3 && r.Failed.Count == 0 && File.Exists(P("a")) && File.Exists(P("b")) && File.Exists(P("c")), "ListStore: три списка сразу");
             }
@@ -411,14 +419,14 @@ static class Program
 
         File.WriteAllText(p, """{"Ip":"10.0.0.1","Port":1080,"Apps":["C:\\a\\Discord.exe","D:\\b\\chrome.exe"]}""");
         var v1 = Settings.Load(p);
-        Check(v1.Ip == "10.0.0.1" && v1.Port == 1080 && v1.Apps.Count == 2 && v1.Apps[0].Path == @"C:\a\Discord.exe" && v1.Apps.All(a => a.Enabled),
+        Check(v1.Ip == "10.0.0.1" && v1.Port == 1080 && v1.Apps.Count == 2 && v1.Apps[0].Path == @"C:\a\Discord.exe" && v1.Apps.All(a => a.Enabled) && v1.Mode == ProxyMode.Socks5,
             "Load: формат v1");
 
         var v2 = new Settings { Apps = A(@"C:\Игра\a.exe", @"C:\b.exe") };
         v2.Apps[1].Enabled = false;
         v2.Save(p);
         var v2b = Settings.Load(p);
-        Check(v2b.Apps.Count == 2 && v2b.Apps[0].Path == @"C:\Игра\a.exe" && v2b.Apps[0].Enabled && !v2b.Apps[1].Enabled,
+        Check(v2b.Apps.Count == 2 && v2b.Apps[0].Path == @"C:\Игра\a.exe" && v2b.Apps[0].Enabled && !v2b.Apps[1].Enabled && v2b.Mode == ProxyMode.Socks5,
             "Save/Load v2: туда и обратно");
 
         File.WriteAllText(p, """{"Ip":"10.0.0.2","Port":99,"Apps":[42,"C:\\x.exe"]}""");
