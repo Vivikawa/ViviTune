@@ -30,7 +30,56 @@ static class Program
         SettingsV4Tests();
         CatalogsTests();
         VlessConfigTests();
+        ListStoreTests();
         return failures == 0 ? 0 : 1;
+    }
+
+    static void ListStoreTests()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "vivitune-lists-" + Guid.NewGuid().ToString("N"));
+        var now = DateTime.UtcNow;
+        var good = new byte[] { 0x53, 0x52, 0x53, 1, 2, 3 };
+        var old = new byte[] { 0x53, 0x52, 0x53, 9 };
+        string P(string id) => Path.Combine(dir, id + ".srs");
+        void Seed(string id, bool stale) { Directory.CreateDirectory(dir); File.WriteAllBytes(P(id), old); File.SetLastWriteTimeUtc(P(id), stale ? now.AddDays(-2) : now); }
+        try
+        {
+            {
+                Seed("fresh", false);
+                int calls = 0;
+                var r = ListStore.Prepare(dir, new[] { "fresh" }, id => { Interlocked.Increment(ref calls); return good; }, now);
+                Check(calls == 0 && r.Files["fresh"] == P("fresh") && r.Failed.Count == 0 && r.Stale.Count == 0, "ListStore: свежая копия не скачивается");
+            }
+            {
+                Seed("upd", true);
+                var r = ListStore.Prepare(dir, new[] { "upd" }, id => good, now);
+                Check(File.ReadAllBytes(P("upd")).SequenceEqual(good) && r.Files.ContainsKey("upd") && r.Stale.Count == 0 && r.Failed.Count == 0 && !File.Exists(P("upd") + ".tmp"),
+                    "ListStore: старая копия обновлена");
+            }
+            {
+                Seed("st", true);
+                var r = ListStore.Prepare(dir, new[] { "st" }, id => throw new IOException("нет сети"), now);
+                Check(r.Files.ContainsKey("st") && r.Stale.Contains("st") && r.Failed.Count == 0 && File.ReadAllBytes(P("st")).SequenceEqual(old),
+                    "ListStore: ошибка скачивания, работаем со старой копией");
+            }
+            {
+                var r = ListStore.Prepare(dir, new[] { "none" }, id => throw new IOException("нет сети"), now);
+                Check(!r.Files.ContainsKey("none") && r.Failed.Contains("none") && !File.Exists(P("none")), "ListStore: нет копии и нет сети");
+            }
+            {
+                var html = System.Text.Encoding.UTF8.GetBytes("<!DOCTYPE html><html></html>");
+                Seed("hs", true);
+                var r1 = ListStore.Prepare(dir, new[] { "hs" }, id => html, now);
+                var r2 = ListStore.Prepare(dir, new[] { "hn" }, id => html, now);
+                Check(r1.Stale.Contains("hs") && r1.Files.ContainsKey("hs") && File.ReadAllBytes(P("hs")).SequenceEqual(old) &&
+                      r2.Failed.Contains("hn") && !File.Exists(P("hn")), "ListStore: не SRS отвергается");
+            }
+            {
+                var r = ListStore.Prepare(dir, new[] { "a", "b", "c" }, id => good, now);
+                Check(r.Files.Count == 3 && r.Failed.Count == 0 && File.Exists(P("a")) && File.Exists(P("b")) && File.Exists(P("c")), "ListStore: три списка сразу");
+            }
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
     static void VlessConfigTests()
