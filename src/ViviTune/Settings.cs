@@ -30,6 +30,11 @@ namespace ViviTune
         public List<AppEntry> Apps { get; set; } = new List<AppEntry>();
         public int? DirectPort { get; set; } // порт SOCKS5 «Мимо Podkop»; null — не задан
         public List<AppEntry> DirectApps { get; set; } = new List<AppEntry>();
+        [JsonConverter(typeof(JsonStringEnumConverter<ProxyMode>))]
+        public ProxyMode Mode { get; set; } = ProxyMode.Socks5;
+        public string VlessLink { get; set; } = "";
+        public string Doh { get; set; } = "quad9";
+        public List<string> Lists { get; set; } = new List<string>(); // id включённых списков ITDog
 
         // Читает и v1 (Apps: ["путь"]), и v2 (Apps: [{Path, Enabled}]); неизвестные элементы пропускает.
         public static Settings Load(string path)
@@ -46,6 +51,16 @@ namespace ViviTune
                     else if (kv.Key.Equals("DirectPort", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue dv && dv.TryGetValue<int>(out var dport)) s.DirectPort = dport;
                     else if (kv.Key.Equals("Apps", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonArray arr) ReadApps(arr, s.Apps);
                     else if (kv.Key.Equals("DirectApps", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonArray darr) ReadApps(darr, s.DirectApps);
+                    else if (kv.Key.Equals("Mode", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue mv && mv.TryGetValue<string>(out var mode))
+                        s.Mode = mode.Equals("vless", StringComparison.OrdinalIgnoreCase) ? ProxyMode.Vless : ProxyMode.Socks5;
+                    else if (kv.Key.Equals("VlessLink", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue lv && lv.TryGetValue<string>(out var link)) s.VlessLink = link;
+                    else if (kv.Key.Equals("Doh", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue hv && hv.TryGetValue<string>(out var doh))
+                        s.Doh = Catalogs.Doh.Any(d => d.Id == doh) ? doh : "quad9";
+                    else if (kv.Key.Equals("Lists", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonArray larr)
+                    {
+                        foreach (var item in larr)
+                            if (item is JsonValue iv2 && iv2.TryGetValue<string>(out var lid) && Catalogs.ListById(lid) is { } known && !s.Lists.Contains(known.Id)) s.Lists.Add(known.Id);
+                    }
                 }
                 return s;
             }
@@ -73,6 +88,11 @@ namespace ViviTune
         // null, если всё корректно; иначе текст ошибки для пользователя
         public string? Validate()
         {
+            if (Mode == ProxyMode.Vless)
+            {
+                VlessServer.Parse(VlessLink, out var linkError);
+                return linkError ?? (ProcessNames().Count + Lists.Count == 0 ? "Добавьте приложение или включите список сайтов" : null);
+            }
             return ValidateProxy(Ip, Port) ?? ValidateDirectPort(DirectPort, Port)
                 ?? (ProcessNames().Count + BypassNames().Count == 0 ? "Добавьте хотя бы одно приложение" : null);
         }
@@ -105,6 +125,7 @@ namespace ViviTune
         public Settings Clone() => new Settings
         {
             Ip = Ip, Port = Port, DirectPort = DirectPort,
+            Mode = Mode, VlessLink = VlessLink, Doh = Doh, Lists = Lists.ToList(),
             Apps = Apps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList(),
             DirectApps = DirectApps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList()
         };

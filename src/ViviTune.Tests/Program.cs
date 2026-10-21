@@ -27,7 +27,55 @@ static class Program
         ViewStateTests();
         AppListTests();
         VlessLinkTests();
+        SettingsV4Tests();
+        CatalogsTests();
         return failures == 0 ? 0 : 1;
+    }
+
+    static void SettingsV4Tests()
+    {
+        const string Link = "vless://3f1c0a52-0000-4000-8000-000000000001@h.example.com:443?security=tls&sni=a.com";
+        var p = Path.GetTempFileName();
+        File.WriteAllText(p, """{"Ip":"10.0.0.1","Port":1080,"Apps":[{"Path":"C:\\a\\x.exe","Enabled":true}],"DirectPort":1819,"DirectApps":[{"Path":"C:\\b\\y.exe","Enabled":true}]}""");
+        var v3 = Settings.Load(p);
+        Check(v3.Mode == ProxyMode.Socks5 && v3.VlessLink == "" && v3.Doh == "quad9" && v3.Lists.Count == 0 && v3.Apps.Count == 1 && v3.DirectApps.Count == 1 && v3.DirectPort == 1819,
+            "Settings v4: файл v3 читается, новые поля по умолчанию");
+
+        var s = new Settings { Mode = ProxyMode.Vless, VlessLink = Link, Doh = "dnssb", Lists = new List<string> { "youtube", "telegram" } };
+        s.Save(p);
+        Check(File.ReadAllText(p).Contains("\"Mode\": \"Vless\""), "Settings v4: Mode пишется строкой");
+        var b = Settings.Load(p);
+        Check(b.Mode == ProxyMode.Vless && b.VlessLink == Link && b.Doh == "dnssb" && b.Lists.SequenceEqual(new[] { "youtube", "telegram" }),
+            "Settings v4: туда и обратно");
+
+        File.WriteAllText(p, """{"Mode":"vless","Doh":"google","Lists":["youtube","nope","YOUTUBE",5]}""");
+        var d = Settings.Load(p);
+        Check(d.Mode == ProxyMode.Vless && d.Doh == "quad9" && d.Lists.SequenceEqual(new[] { "youtube" }), "Settings v4: мусор в Mode/Doh/Lists отфильтрован");
+        File.Delete(p);
+
+        Check(new Settings { Mode = ProxyMode.Vless }.Validate() == "Вставьте VLESS-ссылку в настройках", "Validate Vless: пустая ссылка");
+        Check(new Settings { Mode = ProxyMode.Vless, VlessLink = Link }.Validate() == "Добавьте приложение или включите список сайтов", "Validate Vless: нет программ и списков");
+        Check(new Settings { Mode = ProxyMode.Vless, VlessLink = Link, Lists = new List<string> { "youtube" } }.Validate() == null, "Validate Vless: только список");
+        Check(new Settings { VlessLink = "мусор", Apps = A(@"C:\a\x.exe") }.Validate() == null, "Validate Socks5: ссылку не смотрит");
+
+        var c = s.Clone();
+        c.Lists.Add("discord");
+        Check(c.Mode == ProxyMode.Vless && c.VlessLink == Link && c.Doh == "dnssb" && s.Lists.Count == 2, "Clone: новые поля, список копии независим");
+    }
+
+    static void CatalogsTests()
+    {
+        Check(Catalogs.Doh.Count == 8, "Catalogs: 8 серверов DoH");
+        string[] banned = { "1.1.1.1", "cloudflare", "dns.google", "8.8.8.8" };
+        Check(Catalogs.Doh.All(x => !banned.Any(w => x.Url.Contains(w, StringComparison.OrdinalIgnoreCase))), "Catalogs: в DoH нет Cloudflare и Google");
+        Check(Catalogs.DohById("x").Id == "quad9" && Catalogs.DohById(null).Id == "quad9", "Catalogs: неизвестный DoH -> quad9");
+        Check(Catalogs.DohById("quad9").Label == "Quad9 · 9.9.9.9", "Catalogs: Label по хосту из Url");
+        Check(Catalogs.Lists.Count == 25 && Catalogs.Lists.Select(l => l.Id).Distinct().Count() == 25, "Catalogs: 25 уникальных списков");
+        Check(Catalogs.Lists.All(l => Catalogs.Groups.Contains(l.Group)), "Catalogs: группа каждого списка известна");
+        var inRu = Catalogs.Lists.Where(l => l.InRussiaInside).Select(l => l.Id).OrderBy(x => x).ToArray();
+        Check(inRu.SequenceEqual(new[] { "anime", "block", "geoblock", "hdrezka", "news", "porn", "tiktok", "youtube" }), "Catalogs: InRussiaInside ровно у восьми");
+        Check(Catalogs.ListById("YouTube")?.Id == "youtube" && Catalogs.ListById("nope") == null, "Catalogs: ListById без учёта регистра");
+        Check(Catalogs.ListUrl("youtube") == "https://github.com/itdoginfo/allow-domains/releases/latest/download/youtube.srs", "Catalogs: ListUrl");
     }
 
     static void VlessLinkTests()
