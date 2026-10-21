@@ -27,7 +27,22 @@ namespace ViviTune.Ui
             var settingsPath = Path.Combine(dir, "settings.json");
             var settings = Settings.Load(settingsPath);
             var runner = new Runner(Path.Combine(dir, "sing-box.exe"));
-            var session = new Session(settings, runner, Path.Combine(dir, "config.json"), ProxyProbe.Probe, TimeSpan.FromSeconds(1));
+            var session = new Session(settings, runner, Path.Combine(dir, "config.json"), ProxyProbe.Probe, TimeSpan.FromSeconds(1), new VlessDeps
+            {
+                Resolve = name =>
+                {
+                    try
+                    {
+                        var all = System.Net.Dns.GetHostAddresses(name);
+                        return all.FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? all.FirstOrDefault();
+                    }
+                    catch { return null; }
+                },
+                Reach = ProxyProbe.Reach,
+                PrepareLists = ids => ListStore.Prepare(Path.Combine(dir, "lists"), ids, ListStore.Download, DateTime.UtcNow),
+                AfterStart = (p, s, d, ct) => VlessProbe.AfterStart(p, s, d, ct) ?? Flush()
+            });
+            static string? Flush() { Native.FlushDns(); return null; }
             var state = new ViewState
             {
                 Ip = settings.Ip,

@@ -46,6 +46,17 @@ namespace ViviTune
             return r;
         }
 
+        // TCP-подключение за 3 с: null — ответил, иначе причина
+        public static string? Reach(IPAddress ip, int port)
+        {
+            try
+            {
+                using var c = new TcpClient(ip.AddressFamily);
+                return c.ConnectAsync(ip, port).Wait(timeoutMs) ? null : "таймаут подключения";
+            }
+            catch (Exception e) { return e.GetBaseException().Message; }
+        }
+
         static byte[] ReadN(Stream s, int n)
         {
             var b = new byte[n];

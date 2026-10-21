@@ -31,6 +31,7 @@ static class Program
         CatalogsTests();
         VlessConfigTests();
         ListStoreTests();
+        VlessProbeTests();
         return failures == 0 ? 0 : 1;
     }
 
@@ -734,6 +735,40 @@ static class Program
         l.Stop();
         r = ProxyProbe.Probe("127.0.0.1", closed);
         Check(!r.Reachable && r.Error != null, "Probe: закрытый порт -> Reachable=false с текстом ошибки");
+
+        var l2 = new TcpListener(IPAddress.Loopback, 0);
+        l2.Start();
+        Check(ProxyProbe.Reach(IPAddress.Loopback, ((IPEndPoint)l2.LocalEndpoint).Port) == null, "Reach: слушающий порт -> null");
+        l2.Stop();
+        Check(ProxyProbe.Reach(IPAddress.Loopback, closed) != null, "Reach: закрытый порт -> причина");
+    }
+
+    static void VlessProbeTests()
+    {
+        const string good = "{\"Status\":0,\"Answer\":[{\"data\":\"93.184.215.14\"}]}";
+        Func<string, CancellationToken, (int, string)?> Fake(Func<string, (int, string)?> f) => (path, ct) => f(path);
+        (int, string)? Ok(string path) =>
+            path.StartsWith("/version") ? (200, "{}") :
+            path.StartsWith("/proxies/proxy/delay") ? (200, "{\"delay\":50}") :
+            path.StartsWith("/dns/query") ? (200, good) : null;
+        var ready = TimeSpan.FromSeconds(1);
+
+        Check(VlessProbe.AfterStart(Fake(Ok), "Quad9", CancellationToken.None, ready) == null, "VlessProbe: всё хорошо -> null");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var e = VlessProbe.AfterStart(Fake(_ => null), "Quad9", CancellationToken.None, TimeSpan.FromMilliseconds(300));
+        Check(e == "sing-box не запустился, подробности в логе" && sw.ElapsedMilliseconds < 1000, "VlessProbe: Clash API молчит -> не запустился, быстро");
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/proxies") ? (504, "") : Ok(p)), "Quad9", CancellationToken.None, ready) == "VLESS-сервер не отвечает", "VlessProbe: delay 504");
+        const string dohErr = "DoH-сервер Quad9 не отвечает, выберите другой в настройках";
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/dns") ? (500, "{}") : Ok(p)), "Quad9", CancellationToken.None, ready) == dohErr, "VlessProbe: dns 500");
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/dns") ? (200, "{\"Status\":2}") : Ok(p)), "Quad9", CancellationToken.None, ready) == dohErr, "VlessProbe: dns без ответа");
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        sw.Restart();
+        Check(VlessProbe.AfterStart(Fake(Ok), "Quad9", cts.Token, ready) != null && sw.ElapsedMilliseconds < 500, "VlessProbe: отмена -> не null сразу");
+
+        Check(VlessProbe.DnsAnswered(good), "DnsAnswered: Status 0 и Answer");
+        Check(!VlessProbe.DnsAnswered("{\"Status\":0}") && !VlessProbe.DnsAnswered("{\"Status\":3,\"Answer\":[{}]}")
+            && !VlessProbe.DnsAnswered("мусор") && !VlessProbe.DnsAnswered("{\"Status\":0,\"Answer\":[]}"), "DnsAnswered: без Answer, Status 3, мусор");
     }
 
     static IReadOnlyDictionary<string, ConnSample> Prev(params ConnSample[] c) => c.ToDictionary(x => x.Id);
