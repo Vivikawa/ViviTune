@@ -72,15 +72,18 @@ namespace ViviTune
             return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
         }
 
-        // Общие куски конфига: лог, clash_api, TUN (strict_route только для VLESS).
+        // Общие куски конфига: лог, clash_api, TUN (strict_route и mtu только для VLESS).
         static Dictionary<string, object> Head(int apiPort, string apiSecret) => D(
             "log", D("level", "warn", "timestamp", true),
             "experimental", D("clash_api", D("external_controller", "127.0.0.1:" + apiPort, "secret", apiSecret)));
 
-        static object[] Tun(bool strict) => new object[]
+        // VLESS: mtu 9000, как у Hiddify (без него sing-box 1.12 на Windows берёт 65535); SOCKS5 не трогаем.
+        static object[] Tun(bool vless)
         {
-            D("type", "tun", "tag", "tun-in", "address", new object[] { "172.19.0.1/30", "fdfe:dcba:9876::1/126" }, "auto_route", true, "strict_route", strict)
-        };
+            var tun = D("type", "tun", "tag", "tun-in", "address", new object[] { "172.19.0.1/30", "fdfe:dcba:9876::1/126" }, "auto_route", true, "strict_route", vless);
+            if (vless) tun["mtu"] = 9000;
+            return new object[] { tun };
+        }
 
         // listFiles: id списка -> путь к локальному .srs; server — уже разрешённый IP сервера VLESS.
         public static string BuildVless(Settings s, int apiPort, string apiSecret, IPAddress server, IReadOnlyDictionary<string, string> listFiles)
@@ -137,6 +140,7 @@ namespace ViviTune
                 if (!string.IsNullOrEmpty(v.Sni)) tls["server_name"] = v.Sni;
                 if (v.AllowInsecure) tls["insecure"] = true;
                 if (v.Alpn.Length > 0) tls["alpn"] = v.Alpn;
+                else if (v.Transport == "grpc") tls["alpn"] = new[] { "h2" }; // как Hiddify (ray2sing): gRPC — это HTTP/2
                 if (!string.IsNullOrEmpty(v.Fingerprint)) tls["utls"] = D("enabled", true, "fingerprint", v.Fingerprint);
                 if (v.Security == "reality")
                 {
@@ -158,6 +162,9 @@ namespace ViviTune
                         break;
                     case "grpc":
                         if (!string.IsNullOrEmpty(v.ServiceName)) tr["service_name"] = v.ServiceName;
+                        // как Hiddify (ray2sing): ping HTTP/2 после 15 с тишины, нет ответа 15 с — новое соединение
+                        tr["idle_timeout"] = "15s";
+                        tr["ping_timeout"] = "15s";
                         break;
                     case "httpupgrade":
                         if (host) tr["host"] = v.HostHeader!;

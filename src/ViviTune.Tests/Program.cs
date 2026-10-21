@@ -117,6 +117,7 @@ static class Program
         const string U = "3f1c0a52-0000-4000-8000-000000000001";
         var reality = $"vless://{U}@nl.example.com:443?security=reality&sni=www.microsoft.com&pbk=PUBKEY&sid=ab12&type=tcp&flow=xtls-rprx-vision";
         var wsLink = $"vless://{U}@1.2.3.4:8443?security=tls&type=ws&host=cdn.example.com&path=%2Fws%3Fed%3D2048&fp=firefox&alpn=h2,http/1.1";
+        var grpcLink = $"vless://{U}@nl.example.com:8920?security=reality&sni=www.microsoft.com&pbk=PUBKEY&sid=ab12&type=grpc&serviceName=svc&fp=randomized";
         var srv = IPAddress.Parse("203.0.113.5");
         var files = new Dictionary<string, string> { ["youtube"] = @"C:\l\youtube.srs", ["russia_inside"] = @"C:\l\russia_inside.srs" };
         JsonObject V(string link, Dictionary<string, string> f, params string[] apps)
@@ -144,6 +145,7 @@ static class Program
         var rt = Obj(c["route"]);
         Check(Str(rt["final"]) == "direct" && rt["auto_detect_interface"]!.GetValue<bool>() && Str(rt["default_domain_resolver"]) == "dns", "VLESS: final direct, default_domain_resolver dns");
         Check(Obj(Arr(c["inbounds"])[0])["strict_route"]!.GetValue<bool>(), "VLESS: strict_route true");
+        Check(Obj(Arr(c["inbounds"])[0])["mtu"]?.GetValue<int>() == 9000, "VLESS: TUN mtu 9000, как у Hiddify");
 
         var w = V(wsLink, files, @"C:\a\chrome.exe");
         var wo = Obj(Arr(w["outbounds"])[0]);
@@ -154,6 +156,13 @@ static class Program
 
         var plain = V($"vless://{U}@h.example.com:80", files, @"C:\a\chrome.exe");
         Check(!Obj(Arr(plain["outbounds"])[0]).ContainsKey("tls"), "VLESS: без security нет tls");
+
+        // gRPC — как у Hiddify (ray2sing): ping при простое 15 с, ALPN h2, если в ссылке его нет
+        var go = Obj(Arr(V(grpcLink, files, @"C:\a\chrome.exe")["outbounds"])[0]);
+        var gtr = Obj(go["transport"]);
+        Check(Str(gtr["type"]) == "grpc" && Str(gtr["service_name"]) == "svc" && Str(gtr["idle_timeout"]) == "15s" && Str(gtr["ping_timeout"]) == "15s"
+            && Arr(Obj(go["tls"])["alpn"]).Select(x => Str(x)).SequenceEqual(new[] { "h2" }), "VLESS: grpc idle/ping 15s, alpn h2");
+        Check(!Obj(wo).ContainsKey("transport") || !Obj(wo["transport"]).ContainsKey("idle_timeout"), "VLESS: ws без idle_timeout");
 
         var dq = Arr(Obj(c["dns"])["servers"]);
         var d0 = Obj(dq[0]);
@@ -177,11 +186,11 @@ static class Program
             && Arr(fe["outbounds"]).Count == 1 && Arr(fe["outbounds"])[0]!.ToJsonString() == ob.ToJsonString()
             && !fe.ContainsKey("dns") && !fe.ContainsKey("route"), "VLESS fetch: только mixed на 127.0.0.1 и тот же outbound, без TUN");
 
-        SingBoxCheck(reality, wsLink, srv);
+        SingBoxCheck(reality, wsLink, grpcLink, srv);
     }
 
     // Реальный sing-box check: конфиги из BuildVless принимаются 1.12.12
-    static void SingBoxCheck(string reality, string wsLink, IPAddress srv)
+    static void SingBoxCheck(string reality, string wsLink, string grpcLink, IPAddress srv)
     {
         var exe = Path.Combine(AppContext.BaseDirectory, "sing-box.exe");
         if (!File.Exists(exe))
@@ -210,7 +219,7 @@ static class Program
             File.WriteAllText(src, "{\"version\":3,\"rules\":[{\"domain_suffix\":[\"example.com\"]}]}");
             Check(Run("rule-set", "compile", "--output", srs, src) == 0 && File.Exists(srs), "sing-box rule-set compile");
             var f = new Dictionary<string, string> { ["russia_inside"] = srs };
-            foreach (var (name, link) in new[] { ("reality", reality.Replace("PUBKEY", "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0")), ("ws", wsLink) })
+            foreach (var (name, link) in new[] { ("reality", reality.Replace("PUBKEY", "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0")), ("ws", wsLink), ("grpc", grpcLink.Replace("PUBKEY", "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0")) })
             {
                 var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Apps = A(@"C:\a\chrome.exe") };
                 var cfg = Path.Combine(tmp, name + ".json");
