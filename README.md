@@ -134,6 +134,10 @@ uci commit podkop
 2. Тесты: `dotnet run --project src/ViviTune.Tests`.
 3. Сборка: `dotnet publish src/ViviTune -c Release -o artifacts/publish`. Получится один `ViviTune.exe`, рядом с ним `sing-box.exe` и файлы лицензий.
 
+## Благодарности
+
+Спасибо [@hostabel](https://github.com/hostabel) за тестирование режима VLESS: благодаря ему нашлись проблемы с IPv6 и загрузкой списков, исправленные в 2.2.1.
+
 ## Лицензия
 
 ViviTune распространяется под [GNU GPL v3](LICENSE).
