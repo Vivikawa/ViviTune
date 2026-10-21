@@ -853,6 +853,21 @@ static class Program
     static Settings Both() => new Settings { Ip = "127.0.0.1", Port = 1080, DirectPort = 1090,
         Apps = A(@"C:\a\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe") };
 
+    const string Reality = "vless://3f1c0a52-0000-4000-8000-000000000001@203.0.113.5:443?security=reality&sni=www.microsoft.com&pbk=PUBKEY&sid=ab12&type=tcp&flow=xtls-rprx-vision";
+    const string Doh9Down = "DoH-сервер Quad9 не отвечает, выберите другой в настройках";
+
+    // VLESS: reality на 203.0.113.5:443, одна программа и список YouTube
+    static Settings Vless1() => new Settings { Mode = ProxyMode.Vless, VlessLink = Reality, Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "youtube" } };
+
+    static ListsResult NoFiles(params string[] failed) => new(new Dictionary<string, string>(), failed, Array.Empty<string>());
+
+    // Теги route.rule_set конфига (пусто, если их нет).
+    static List<string> CfgLists(string path)
+    {
+        var rs = Obj(JsonNode.Parse(File.ReadAllText(path))!["route"])["rule_set"];
+        return rs == null ? new List<string>() : Arr(rs).Select(x => Str(Obj(x)["tag"])!).ToList();
+    }
+
     static void EvaluateTests()
     {
         var ok = new ProbeResult { Reachable = true, UdpSupported = true };
@@ -885,6 +900,20 @@ static class Program
             "Evaluate: порт не указан при программах в списке -> предупреждение");
         noPort.DirectApps[0].Enabled = false;
         Check(Session.Evaluate(noPort, ok, null).Warnings.Count == 0, "Evaluate: программы «Мимо Podkop» выключены -> про порт молчим");
+
+        var srv = IPAddress.Parse("203.0.113.5");
+        var vs = new Settings { Mode = ProxyMode.Vless, VlessLink = Reality, Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "youtube", "telegram" } };
+        v = Session.EvaluateVless(vs, srv, NoFiles("telegram", "youtube"));
+        Check(v.Error == null && v.Live == new Exits(true, false) && v.UdpOk == null && v.Vless != null && v.Vless.Server.Equals(srv) && v.Vless.ListFiles.Count == 0
+            && v.Warnings.SequenceEqual(new[] { "Список Telegram не загрузился", "Список YouTube не загрузился" }),
+            "EvaluateVless: два Failed -> два предупреждения в порядке Failed");
+        vs.Apps.Clear();
+        v = Session.EvaluateVless(vs, srv, NoFiles("telegram", "youtube"));
+        Check(v.Error == "Списки не загрузились" && v.Vless == null && v.Warnings.Count == 0, "EvaluateVless: нет программ и ни одного файла -> ошибка");
+        var one = new Dictionary<string, string> { ["youtube"] = @"C:\l\youtube.srs" };
+        v = Session.EvaluateVless(vs, srv, new ListsResult(one, new[] { "telegram" }, Array.Empty<string>()));
+        Check(v.Error == null && v.Vless!.ListFiles.ContainsKey("youtube") && v.Warnings.SequenceEqual(new[] { "Список Telegram не загрузился" }),
+            "EvaluateVless: без программ хватает одного загруженного списка");
     }
 
     static List<string> CfgApps(string path)
@@ -1218,6 +1247,291 @@ static class Program
                 Check(ss.State == ConnState.Connected && fb.Starts == 1 && bypassProbed && ss.Live == new Exits(true, true) && AppRule(rules, "bypass") != null,
                     "Session: во время проверки появился список «Мимо Podkop» -> его порт проверяется до запуска");
             }
+
+            // --- VLESS ---
+            {
+                var fb = new FakeSingBox();
+                var fv = new FakeVless(root);
+                var cfg = NewCfg();
+                using var ss = new Session(Vless1(), fb, cfg, Up, Delay, fv.Deps);
+                bool done = ss.ConnectAsync().Wait(2000);
+                var c = JsonNode.Parse(File.ReadAllText(cfg))!;
+                var ob = Obj(Arr(c["outbounds"])[0]);
+                var ca = Obj(Obj(c["experimental"])["clash_api"]);
+                Check(done && ss.State == ConnState.Connected && fb.Starts == 1 && ss.Live == new Exits(true, false) && ss.UdpOk == null
+                      && ss.Warnings.Count == 0 && ss.Error == null && ss.ConnectedSince != null, "Session VLESS: успешное подключение");
+                Check(Str(ob["type"]) == "vless" && Str(ob["server"]) == "203.0.113.5" && CfgLists(cfg).SequenceEqual(new[] { "youtube" }) && fv.Resolves == 0,
+                    "Session VLESS: в конфиге outbound vless на IP из ссылки и rule_set youtube");
+                lock (fv.DohNames)
+                    Check(fv.AfterStarts == 1 && fv.DohNames.SequenceEqual(new[] { "Quad9" }) && Str(ca["external_controller"]) == "127.0.0.1:" + fv.ApiPort
+                          && Str(ca["secret"]) == fv.ApiSecret, "Session VLESS: проверка после запуска один раз, DoH Quad9, Clash API из конфига");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                s.VlessLink = Reality.Replace("203.0.113.5", "nl.example.com");
+                var fv = new FakeVless(root, resolve: _ => null);
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                var fv2 = new FakeVless(root, resolve: _ => throw new System.Net.Sockets.SocketException(11001));
+                using var ss2 = new Session(s, fb, NewCfg(), Up, Delay, fv2.Deps);
+                ss2.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Disconnected && ss.Error == "VLESS-сервер не найден: nl.example.com" && fv.Resolves == 1 && fv.Reaches == 0
+                      && ss2.State == ConnState.Disconnected && ss2.Error == "VLESS-сервер не найден: nl.example.com" && fb.Starts == 0,
+                    "Session VLESS: имя сервера не разрешилось (null или исключение) -> ошибка, sing-box не запускается");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                s.VlessLink = Reality.Replace("203.0.113.5", "nl.example.com");
+                IPAddress? reached = null;
+                var fv = new FakeVless(root, resolve: h => h == "nl.example.com" ? IPAddress.Parse("198.51.100.7") : null, reach: (ip, port) => { reached = ip; return port == 443 ? null : "порт"; });
+                var cfg = NewCfg();
+                using var ss = new Session(s, fb, cfg, Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Connected && "198.51.100.7".Equals(reached?.ToString()) && Str(Obj(Arr(JsonNode.Parse(File.ReadAllText(cfg))!["outbounds"])[0])["server"]) == "198.51.100.7",
+                    "Session VLESS: имя сервера разрешается до запуска, в конфиг и проверку TCP идёт IP");
+            }
+            {
+                var fb = new FakeSingBox();
+                var fv = new FakeVless(root, reach: (_, _) => "таймаут подключения");
+                using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Disconnected && ss.Error == "VLESS-сервер не отвечает: таймаут подключения" && fb.Starts == 0 && fv.Prepares == 0,
+                    "Session VLESS: сервер не отвечает -> ошибка, sing-box не запускается");
+            }
+            {
+                var fb = new FakeSingBox();
+                var fv = new FakeVless(root, afterStart: (_, _, _, _) => Doh9Down);
+                using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Disconnected && ss.Error == Doh9Down && fb.Starts == 1 && !fb.Running && ss.Warnings.Count == 0,
+                    "Session VLESS: DoH не ответил после запуска -> sing-box остановлен, ошибка как есть");
+            }
+            {
+                var fb = new FakeSingBox();
+                var fv = new FakeVless(root, lists: ids => NoFiles("youtube"));
+                var cfg = NewCfg();
+                using var ss = new Session(Vless1(), fb, cfg, Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Connected && fb.Starts == 1 && ss.Warnings.SequenceEqual(new[] { "Список YouTube не загрузился" }) && CfgLists(cfg).Count == 0,
+                    "Session VLESS: список не загрузился при программе -> подключено с предупреждением");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                s.Apps.Clear();
+                var fv = new FakeVless(root, lists: ids => NoFiles("youtube"));
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Disconnected && ss.Error == "Списки не загрузились" && fb.Starts == 0,
+                    "Session VLESS: ни один список не загрузился и программ нет -> ошибка");
+            }
+            {
+                var fb = new FakeSingBox();
+                var old = Path.Combine(root, "old-youtube.srs");
+                File.WriteAllBytes(old, new byte[] { 0x53, 0x52, 0x53 });
+                var fv = new FakeVless(root, lists: ids => new ListsResult(new Dictionary<string, string> { ["youtube"] = old }, Array.Empty<string>(), new[] { "youtube" }));
+                var cfg = NewCfg();
+                using var ss = new Session(Vless1(), fb, cfg, Up, Delay, fv.Deps);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                lock (logs)
+                    Check(ss.State == ConnState.Connected && ss.Warnings.Count == 0 && CfgLists(cfg).SequenceEqual(new[] { "youtube" })
+                          && logs.Contains("Список YouTube не обновился, работаю со старой копией"),
+                        "Session VLESS: старая копия -> подключено без предупреждения, строка в логе");
+            }
+            {
+                // ListStore отдаёт Failed и Stale в случайном порядке: предупреждения и лог — в порядке каталога
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                s.Lists = new List<string> { "youtube", "telegram", "discord", "russia_inside" };
+                var files = new Dictionary<string, string> { ["discord"] = Path.Combine(root, "d.srs"), ["russia_inside"] = Path.Combine(root, "r.srs") };
+                var fv = new FakeVless(root, lists: ids => new ListsResult(files, new[] { "telegram", "youtube" }, new[] { "discord", "russia_inside" }));
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                lock (logs)
+                    Check(ss.Warnings.SequenceEqual(new[] { "Список YouTube не загрузился", "Список Telegram не загрузился" })
+                          && logs.Where(l => l.StartsWith("Список ")).SequenceEqual(new[] { "Список Russia inside не обновился, работаю со старой копией", "Список Discord не обновился, работаю со старой копией" }),
+                        "Session VLESS: Failed и Stale в порядке каталога");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                var fv = new FakeVless(root);
+                var cfg = NewCfg();
+                using var ss = new Session(s, fb, cfg, Up, Delay, fv.Deps);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                s.Lists.Add("telegram");
+                ss.AppsChanged();
+                bool restarting = ss.State == ConnState.Restarting;
+                Thread.Sleep(300);
+                string[] last;
+                lock (fv.Prepared) last = fv.Prepared[^1];
+                Check(restarting && fb.Starts == 2 && ss.State == ConnState.Connected && CfgLists(cfg).SequenceEqual(new[] { "youtube", "telegram" })
+                      && last.SequenceEqual(new[] { "youtube", "telegram" }) && fv.AfterStarts == 2,
+                    "Session VLESS: список включён во время работы -> перезапуск, списки готовятся заново");
+                lock (logs) Check(logs.Contains("Перезапуск sing-box: приложения или списки изменены"), "Session VLESS: строка перезапуска");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                var fv = new FakeVless(root);
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                s.Lists.Add("telegram");
+                ss.AppsChanged();
+                bool restarting = ss.State == ConnState.Restarting;
+                s.Lists.Remove("telegram");
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                Check(restarting && ss.State == ConnState.Connected && fb.Starts == 1 && fb.Stops == 0 && fv.Prepares == 1,
+                    "Session VLESS: список включили и сразу выключили -> без перезапуска");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                s.Lists.Add("telegram");
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, new FakeVless(root).Deps);
+                ss.ConnectAsync().Wait(2000);
+                s.Lists = new List<string> { "telegram", "youtube" };
+                ss.AppsChanged();
+                bool same = ss.State == ConnState.Connected;
+                Thread.Sleep(150);
+                Check(same && ss.State == ConnState.Connected && fb.Starts == 1, "Session VLESS: те же списки в другом порядке -> без перезапуска");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, new FakeVless(root).Deps);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                s.Apps[0].Enabled = false;
+                ss.AppsChanged();
+                bool still = ss.State == ConnState.Restarting; // остался список: перезапуск, не отключение
+                Thread.Sleep(300);
+                s.Lists.Clear();
+                ss.AppsChanged();
+                Thread.Sleep(150);
+                lock (logs)
+                    Check(still && ss.State == ConnState.Disconnected && ss.Error == null && fb.Starts == 2 && !fb.Running
+                          && logs.Contains("Отключено: нет включённых приложений и списков"),
+                        "Session VLESS: убраны программа и все списки -> отключено, строка в логе");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                s.VlessLink = "";
+                var fv = new FakeVless(root);
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Disconnected && ss.Error == "Вставьте VLESS-ссылку в настройках" && fb.Starts == 0 && fv.Reaches == 0,
+                    "Session VLESS: пустая ссылка -> ошибка, sing-box не запускается");
+            }
+            {
+                var fb = new FakeSingBox();
+                using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Disconnected && ss.Error == "Режим VLESS недоступен" && fb.Starts == 0, "Session VLESS: без VlessDeps -> ошибка");
+            }
+            {
+                // Review Focus 4: «Отключить» во время проверки после запуска
+                var fb = new FakeSingBox();
+                using var started = new ManualResetEventSlim();
+                var fv = new FakeVless(root, afterStart: (_, _, _, ct) => { started.Set(); ct.WaitHandle.WaitOne(5000); return "VLESS-сервер не отвечает"; });
+                using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay, fv.Deps);
+                var t = ss.ConnectAsync();
+                bool inCheck = started.Wait(2000);
+                Thread.Sleep(200);
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                ss.Disconnect();
+                var took = sw.Elapsed;
+                bool done = t.Wait(2000);
+                Check(inCheck && done && took < TimeSpan.FromSeconds(1) && ss.State == ConnState.Disconnected && ss.Error == null && !fb.Running && fb.Starts == 1,
+                    "Session VLESS: Disconnect во время проверки после запуска -> быстро, sing-box остановлен, без ошибки");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                int calls = 0;
+                using var started = new ManualResetEventSlim();
+                var fv = new FakeVless(root, afterStart: (_, _, _, ct) =>
+                {
+                    if (Interlocked.Increment(ref calls) == 1) return null;
+                    started.Set(); // проверка после перезапуска висит
+                    ct.WaitHandle.WaitOne(5000);
+                    return "VLESS-сервер не отвечает";
+                });
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                s.Lists.Add("telegram");
+                ss.AppsChanged();
+                bool inCheck = started.Wait(2000);
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                ss.Disconnect();
+                var took = sw.Elapsed;
+                Thread.Sleep(100);
+                Check(inCheck && took < TimeSpan.FromSeconds(1) && ss.State == ConnState.Disconnected && ss.Error == null && !fb.Running && fb.Starts == 2,
+                    "Session VLESS: Disconnect во время проверки после перезапуска -> быстро, sing-box остановлен, без ошибки");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                int calls = 0;
+                var fv = new FakeVless(root, afterStart: (_, _, _, _) => Interlocked.Increment(ref calls) == 1 ? null : Doh9Down);
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                s.Lists.Add("telegram");
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                lock (logs)
+                    Check(ss.State == ConnState.Disconnected && ss.Error == Doh9Down && !fb.Running && fb.Starts == 2 && logs.Contains(Doh9Down),
+                        "Session VLESS: DoH не ответил при перезапуске -> sing-box остановлен, ошибка");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                var cfg = NewCfg();
+                using var started = new ManualResetEventSlim();
+                using var release = new ManualResetEventSlim();
+                var fv = new FakeVless(root, reach: (_, _) => { started.Set(); release.Wait(2000); return null; });
+                using var ss = new Session(s, fb, cfg, Up, Delay, fv.Deps);
+                var t = ss.ConnectAsync();
+                started.Wait(2000); // проверка идёт по снимку с одним YouTube
+                s.Lists.Add("telegram");
+                ss.AppsChanged();
+                release.Set();
+                t.Wait(2000);
+                string[] last;
+                lock (fv.Prepared) last = fv.Prepared[^1];
+                Check(ss.State == ConnState.Connected && fb.Starts == 1 && fv.Prepares == 2 && last.SequenceEqual(new[] { "youtube", "telegram" })
+                      && CfgLists(cfg).SequenceEqual(new[] { "youtube", "telegram" }),
+                    "Session VLESS: список включён во время проверки -> списки готовятся заново до запуска");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                using var started = new ManualResetEventSlim();
+                using var release = new ManualResetEventSlim();
+                var fv = new FakeVless(root, reach: (_, _) => { started.Set(); release.Wait(2000); return null; }, lists: ids => NoFiles(ids.ToArray()));
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
+                var t = ss.ConnectAsync();
+                started.Wait(2000);
+                s.Apps[0].Enabled = false; // единственную программу выключили во время проверки, а списки не загрузятся
+                ss.AppsChanged();
+                release.Set();
+                t.Wait(2000);
+                Check(ss.State == ConnState.Disconnected && ss.Error == "Списки не загрузились" && fb.Starts == 0,
+                    "Session VLESS: программы пропали во время проверки -> итог проверяется заново");
+            }
             using (var rn = new ViviTune.Windows.Runner(Path.Combine(root, "нет", "sing-box.exe")))
             {
                 ISingBox sb = rn;
@@ -1294,4 +1608,48 @@ sealed class FakeSingBox : ISingBox
     }
 
     public void LateExited() => Exited?.Invoke(); // Exited прежнего процесса пришёл, когда новый уже работает
+}
+
+// Подмена VlessDeps: считает вызовы, запоминает id списков и имена DoH. По умолчанию имя не разрешается,
+// сервер отвечает, каждый список — существующий файл в dir, проверка после запуска проходит.
+sealed class FakeVless
+{
+    public int Resolves, Reaches, Prepares, AfterStarts;
+    public readonly List<string[]> Prepared = new();  // под lock (Prepared)
+    public readonly List<string> DohNames = new();    // под lock (DohNames), как и ApiPort/ApiSecret
+    public int ApiPort;
+    public string? ApiSecret;
+    public readonly VlessDeps Deps;
+
+    public FakeVless(string dir, Func<string, IPAddress?>? resolve = null, Func<IPAddress, int, string?>? reach = null,
+        Func<IReadOnlyList<string>, ListsResult>? lists = null, Func<int, string, string, CancellationToken, string?>? afterStart = null)
+    {
+        Deps = new VlessDeps
+        {
+            Resolve = host => { Interlocked.Increment(ref Resolves); return resolve?.Invoke(host); },
+            Reach = (ip, port) => { Interlocked.Increment(ref Reaches); return reach?.Invoke(ip, port); },
+            PrepareLists = ids =>
+            {
+                Interlocked.Increment(ref Prepares);
+                lock (Prepared)
+                {
+                    Prepared.Add(ids.ToArray());
+                    if (lists != null) return lists(ids);
+                    var files = new Dictionary<string, string>();
+                    foreach (var id in ids)
+                    {
+                        files[id] = Path.Combine(dir, id + ".srs");
+                        File.WriteAllBytes(files[id], new byte[] { 0x53, 0x52, 0x53 });
+                    }
+                    return new ListsResult(files, Array.Empty<string>(), Array.Empty<string>());
+                }
+            },
+            AfterStart = (port, secret, doh, ct) =>
+            {
+                Interlocked.Increment(ref AfterStarts);
+                lock (DohNames) { DohNames.Add(doh); ApiPort = port; ApiSecret = secret; }
+                return afterStart?.Invoke(port, secret, doh, ct);
+            }
+        };
+    }
 }
