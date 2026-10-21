@@ -114,7 +114,7 @@ uci commit podkop
 
 ![Вкладка «Сайты»](docs/vless-sites.png)
 
-Некоторые списки входят в другие (например, Anime, Block и News уже входят в Russia inside): такие строки в интерфейсе отмечены «уже входит в …», отдельно включать их не нужно.
+Когда включён Russia inside, списки, которые в него входят (Anime, Block, GeoBlock, News, Porn, YouTube и др.), отмечены «уже входит в Russia inside», отдельно включать их не нужно.
 
 ### Списки ITDog
 

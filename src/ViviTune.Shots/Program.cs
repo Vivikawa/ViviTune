@@ -84,6 +84,12 @@ s.SetVless("vless://3f1c2a9e-7b4d-4c1e-9a55-0d6f8e2b7c41@nl-amsterdam.example.co
 s.SyncLists(["russia_inside", "telegram", "google_ai"]);
 s.State = ConnState.Connected;
 s.DetailText = ViewState.DetailVless(new TimeSpan(0, 12, 3), 2, 3, "Quad9");
+for (int i = 0; i < 60; i++) // демо-история скорости, как в SOCKS5
+{
+    double up = 0.9 * MiB * (1 + 0.45 * Math.Sin((i - 59) / 4.5)) + (i == 40 ? 1.2 * MiB : 0);
+    double down = 6.1 * MiB * (1 + 0.5 * Math.Sin((i - 59) / 6.0));
+    s.PushSpeed(new Speed(up, down, (long)up, (long)down));
+}
 Shot(NavPage.Home, "home-vless-connected.png");
 s.State = ConnState.Disconnected;
 s.DetailText = "";

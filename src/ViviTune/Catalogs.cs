@@ -43,7 +43,7 @@ namespace ViviTune
             new("geoblock", "GeoBlock", "Категории", "Сайты, закрывающиеся для российских адресов", true),
             new("news", "News", "Категории", "Новостные сайты", true),
             new("porn", "Porn", "Категории", "Сайты для взрослых", true),
-            new("hodca", "H.O.D.C.A", "Категории", "Сайты Hetzner, OVH, DigitalOcean, CloudFront, Akamai", false),
+            new("hodca", "H.O.D.C.A", "Категории", "Сайты Hetzner, OVH, DigitalOcean, Cloudflare, AWS, Akamai", false),
             new("youtube", "YouTube", "Сервисы", "Видео и домены Google для YouTube", true),
             new("discord", "Discord", "Сервисы", AlsoInRu, false),
             new("telegram", "Telegram", "Сервисы", "Подсети и домены Telegram", false),
