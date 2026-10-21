@@ -49,17 +49,8 @@
             <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding VlessSummary}"
                        Classes.ok="{Binding !VlessLinkError}" Classes.err="{Binding VlessLinkError}"
                        IsVisible="{Binding VlessSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-            <TextBlock Classes="muted" Margin="0,6,0,0" Text="DNS-сервер (DoH, не передаёт ваше местоположение)" />
-            <ComboBox Name="DohBox" HorizontalAlignment="Stretch" ItemsSource="{Binding DohServers}"
-                      IsEnabled="{Binding SettingsEditable}">
-              <ComboBox.ItemTemplate>
-                <DataTemplate x:DataType="vt:DohServer">
-                  <TextBlock Text="{Binding Label}" />
-                </DataTemplate>
-              </ComboBox.ItemTemplate>
-            </ComboBox>
             <TextBlock Classes="muted" TextWrapping="Wrap"
-                       Text="Пока подключено, весь DNS компьютера идёт через этот сервер внутри VPN." />
+                       Text="Пока подключено, весь DNS компьютера идёт через VPN (1.1.1.1): провайдер его не видит и не подменяет." />
           </StackPanel>
         </Border>
         <TextBlock Classes="muted" TextWrapping="Wrap" IsVisible="{Binding !SettingsEditable}"

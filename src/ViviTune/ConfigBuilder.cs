@@ -146,22 +146,12 @@ namespace ViviTune
             if (names.Length > 0) rules.Add(D("process_name", names, "outbound", "proxy"));
             if (lists.Length > 0) rules.Add(D("rule_set", lists, "outbound", "proxy"));
 
-            // DoH идёт через туннель; имя вместо IP разрешает bootstrap (тоже через туннель)
-            var doh = new Uri(Catalogs.DohById(s.Doh).Url);
-            var dohSrv = D("type", "https", "tag", "doh", "server", doh.Host, "path", doh.AbsolutePath, "detour", "proxy");
-            if (doh.Port != 443) dohSrv["server_port"] = doh.Port;
-            var dnsServers = new List<object> { dohSrv };
-            if (!IPAddress.TryParse(doh.Host, out _))
-            {
-                dohSrv["domain_resolver"] = "bootstrap";
-                dnsServers.Add(D("type", "https", "tag", "bootstrap", "server", "9.9.9.9", "path", "/dns-query", "detour", "proxy"));
-            }
-
+            // весь DNS компьютера — к 1.1.1.1 через туннель: провайдер его не видит и не подменяет
             var config = Head(apiPort, apiSecret);
-            config["dns"] = D("servers", dnsServers.ToArray(), "final", "doh");
+            config["dns"] = D("servers", new object[] { D("type", "tcp", "tag", "dns", "server", "1.1.1.1", "detour", "proxy") }, "final", "dns");
             config["inbounds"] = Tun(true);
             config["outbounds"] = new object[] { proxy, D("type", "direct", "tag", "direct") };
-            var route = D("rules", rules.ToArray(), "final", "direct", "auto_detect_interface", true, "default_domain_resolver", "doh");
+            var route = D("rules", rules.ToArray(), "final", "direct", "auto_detect_interface", true, "default_domain_resolver", "dns");
             if (lists.Length > 0)
                 route["rule_set"] = lists.Select(id => (object)D("type", "local", "tag", id, "format", "binary", "path", listFiles[id])).ToArray();
             config["route"] = route;

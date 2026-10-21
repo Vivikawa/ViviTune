@@ -33,7 +33,6 @@ namespace ViviTune
         [JsonConverter(typeof(JsonStringEnumConverter<ProxyMode>))]
         public ProxyMode Mode { get; set; } = ProxyMode.Socks5;
         public string VlessLink { get; set; } = "";
-        public string Doh { get; set; } = "quad9";
         public List<string> Lists { get; set; } = new List<string>(); // id включённых списков ITDog
 
         // Читает и v1 (Apps: ["путь"]), и v2 (Apps: [{Path, Enabled}]); неизвестные элементы пропускает.
@@ -54,8 +53,6 @@ namespace ViviTune
                     else if (kv.Key.Equals("Mode", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue mv && mv.TryGetValue<string>(out var mode))
                         s.Mode = mode.Equals("vless", StringComparison.OrdinalIgnoreCase) ? ProxyMode.Vless : ProxyMode.Socks5;
                     else if (kv.Key.Equals("VlessLink", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue lv && lv.TryGetValue<string>(out var link)) s.VlessLink = link;
-                    else if (kv.Key.Equals("Doh", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue hv && hv.TryGetValue<string>(out var doh))
-                        s.Doh = Catalogs.DohById(doh).Id;
                     else if (kv.Key.Equals("Lists", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonArray larr)
                     {
                         foreach (var item in larr)
@@ -125,7 +122,7 @@ namespace ViviTune
         public Settings Clone() => new Settings
         {
             Ip = Ip, Port = Port, DirectPort = DirectPort,
-            Mode = Mode, VlessLink = VlessLink, Doh = Doh, Lists = Lists.ToList(),
+            Mode = Mode, VlessLink = VlessLink, Lists = Lists.ToList(),
             Apps = Apps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList(),
             DirectApps = DirectApps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList()
         };

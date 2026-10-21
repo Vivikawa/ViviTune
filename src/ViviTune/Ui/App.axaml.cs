@@ -33,7 +33,7 @@ namespace ViviTune.Ui
                 Resolve = name => System.Net.Dns.GetHostAddresses(name).OrderBy(a => a.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork).FirstOrDefault(),
                 Reach = ProxyProbe.Reach,
                 PrepareLists = ids => ListStore.Prepare(Path.Combine(dir, "lists"), ids, ListStore.Download, DateTime.UtcNow),
-                AfterStart = (p, s, d, ct) => VlessProbe.AfterStart(p, s, d, ct) ?? Flush()
+                AfterStart = (p, s, ct) => VlessProbe.AfterStart(p, s, ct) ?? Flush()
             });
             // Очистка кэша DNS — по возможности: экспорт недокументирован, его сбой не должен ронять запуск.
             static string? Flush() { try { Native.FlushDns(); } catch { } return null; }
@@ -44,7 +44,6 @@ namespace ViviTune.Ui
                 Ip = settings.Ip,
                 Port = settings.Port,
                 Mode = settings.Mode,
-                Doh = settings.Doh,
                 DirectPort = settings.DirectPort,
                 SettingsError = Settings.ValidateProxy(settings.Ip, settings.Port) ?? Settings.ValidateDirectPort(settings.DirectPort, settings.Port),
                 ListRunning = exclude => ProcessCatalog.Running(exclude).Select(a => (a.Path, a.Name, a.Background)),
@@ -123,7 +122,7 @@ namespace ViviTune.Ui
                 var live = session.Live;
                 state.DetailText = state.State != ConnState.Connected || since == null ? ""
                     : state.IsVless
-                    ? ViewState.DetailVless(DateTime.Now - since.Value, state.Apps.Count(a => a.Enabled), settings.Lists.Count, Catalogs.DohById(settings.Doh).Name)
+                    ? ViewState.DetailVless(DateTime.Now - since.Value, state.Apps.Count(a => a.Enabled), settings.Lists.Count)
                     : ViewState.Detail(DateTime.Now - since.Value, session.UdpOk,
                         live.Proxy ? state.Apps.Count(a => a.Enabled) : 0, live.Bypass ? state.DirectApps.Count(a => a.Enabled) : 0);
             }
@@ -165,13 +164,11 @@ namespace ViviTune.Ui
                 state.Mode = mode;
                 Save();
             };
-            state.SetVlessRequested += (link, dohId) =>
+            state.SetVlessRequested += link =>
             {
                 if (session.State != ConnState.Disconnected) return;
                 settings.VlessLink = link;
-                settings.Doh = Catalogs.DohById(dohId).Id;
                 state.SetVless(link);
-                state.Doh = settings.Doh;
                 Save();
             };
             state.SetProxyRequested += (ip, port, direct) =>

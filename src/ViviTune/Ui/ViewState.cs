@@ -22,7 +22,7 @@ public sealed class ViewState : INotifyPropertyChanged
     int? directPort;
     bool directTab, proxyDown, bypassDown;
     ProxyMode mode;
-    string vlessHost = "", vlessLink = "", vlessSummary = "", doh = "quad9";
+    string vlessHost = "", vlessLink = "", vlessSummary = "";
     bool vlessLinkError;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -32,7 +32,7 @@ public sealed class ViewState : INotifyPropertyChanged
     public event Action<string, bool>? SetAppEnabledRequested;
     public event Action<string, int, int?>? SetProxyRequested;
     public event Action<ProxyMode>? SetModeRequested;
-    public event Action<string, string>? SetVlessRequested; // ссылка, id DoH
+    public event Action<string>? SetVlessRequested; // ссылка
     public event Action<string, bool>? SetListEnabledRequested; // id списка
 
     public ViewState()
@@ -126,8 +126,6 @@ public sealed class ViewState : INotifyPropertyChanged
     public string VlessLink { get => vlessLink; private set => Set(ref vlessLink, value); }
     public string VlessSummary { get => vlessSummary; private set => Set(ref vlessSummary, value); }
     public bool VlessLinkError { get => vlessLinkError; private set => Set(ref vlessLinkError, value); }
-    public string Doh { get => doh; set => Set(ref doh, value); }
-    public IReadOnlyList<DohServer> DohServers => Catalogs.Doh;
     public IReadOnlyList<ListGroup> ListGroups { get; }
 
     // Ссылка из Settings: сервер и сводка под полем, либо текст ошибки (пустая ссылка — без ошибки)
@@ -258,13 +256,13 @@ public sealed class ViewState : INotifyPropertyChanged
         return time + u + p + d;
     }
 
-    // Строка под статусом в VLESS: «00:12:03 · 2 приложения · 3 списка · DNS Quad9»; нулевые части (кроме DNS) не пишутся.
-    public static string DetailVless(TimeSpan up, int apps, int lists, string dohName)
+    // Строка под статусом в VLESS: «00:12:03 · 2 приложения · 3 списка»; нулевые части не пишутся.
+    public static string DetailVless(TimeSpan up, int apps, int lists)
     {
         var s = Format.Uptime(up < TimeSpan.Zero ? TimeSpan.Zero : up);
         if (apps > 0) s += " · " + Format.Plural(apps, "приложение", "приложения", "приложений");
         if (lists > 0) s += " · " + Format.Plural(lists, "список", "списка", "списков");
-        return s + " · DNS " + dohName;
+        return s;
     }
 
     public void RequestToggle() => ToggleRequested?.Invoke();
@@ -281,10 +279,10 @@ public sealed class ViewState : INotifyPropertyChanged
 
     public void RequestSetMode(ProxyMode m) => SetModeRequested?.Invoke(m);
     // Без изменений события нет (как у RequestSetProxy): заполнение полей при старте не должно переписывать settings.json
-    public void RequestSetVless(string link, string dohId)
+    public void RequestSetVless(string link)
     {
-        if (link == VlessLink && dohId == Doh) return;
-        SetVlessRequested?.Invoke(link, dohId);
+        if (link == VlessLink) return;
+        SetVlessRequested?.Invoke(link);
     }
     public void RequestSetListEnabled(string id, bool enabled)
     {

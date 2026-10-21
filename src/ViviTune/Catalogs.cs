@@ -6,32 +6,10 @@ namespace ViviTune
 {
     public enum ProxyMode { Socks5, Vless }
 
-    public sealed record DohServer(string Id, string Name, string Url)
-    {
-        // "Quad9 · 9.9.9.9": название и хост из адреса
-        public string Label { get; } = Name + " · " + new Uri(Url).Host;
-    }
-
     public sealed record ItdogList(string Id, string Name, string Group, string Note, bool InRussiaInside);
 
     public static class Catalogs
     {
-        // Порядок — как в выпадающем списке. Cloudflare и Google в конце: DoH идёт внутри VPN, а НСДИ перехватывает
-        // обычный DNS по UDP, до шифрованного запроса через туннель ему не добраться.
-        public static IReadOnlyList<DohServer> Doh { get; } = new DohServer[]
-        {
-            new("quad9", "Quad9", "https://9.9.9.9/dns-query"),
-            new("dnssb", "DNS.SB", "https://185.222.222.222/dns-query"),
-            new("controld", "Control D", "https://freedns.controld.com/p0"),
-            new("wikimedia", "Wikimedia", "https://wikimedia-dns.org/dns-query"),
-            new("digitale", "Digitale Gesellschaft", "https://dns.digitale-gesellschaft.ch/dns-query"),
-            new("switch", "SWITCH", "https://dns.switch.ch/dns-query"),
-            new("appliedprivacy", "Applied Privacy", "https://doh.applied-privacy.net/query"),
-            new("cira", "CIRA Private", "https://private.canadianshield.cira.ca/dns-query"),
-            new("cloudflare", "Cloudflare", "https://1.1.1.1/dns-query"),
-            new("google", "Google", "https://8.8.8.8/dns-query"),
-        };
-
         public static IReadOnlyList<string> Groups { get; } = new[] { "Страны", "Категории", "Сервисы", "Хостинги" };
 
         const string AlsoInRu = "Домены уже есть в Russia inside; список добавляет IP-подсети (звонки и трафик по IP)";
@@ -64,9 +42,6 @@ namespace ViviTune
             new("hetzner", "Hetzner", "Хостинги", "Подсети Hetzner", false),
             new("ovh", "OVH", "Хостинги", "Подсети OVH", false),
         };
-
-        // Неизвестный id -> Quad9
-        public static DohServer DohById(string? id) => Doh.FirstOrDefault(d => d.Id == id) ?? Doh[0];
 
         public static ItdogList? ListById(string? id) =>
             Lists.FirstOrDefault(l => l.Id.Equals(id, StringComparison.OrdinalIgnoreCase));

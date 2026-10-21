@@ -115,13 +115,13 @@ static class Program
         var wsLink = $"vless://{U}@1.2.3.4:8443?security=tls&type=ws&host=cdn.example.com&path=%2Fws%3Fed%3D2048&fp=firefox&alpn=h2,http/1.1";
         var srv = IPAddress.Parse("203.0.113.5");
         var files = new Dictionary<string, string> { ["youtube"] = @"C:\l\youtube.srs", ["russia_inside"] = @"C:\l\russia_inside.srs" };
-        JsonObject V(string link, string doh, Dictionary<string, string> f, params string[] apps)
+        JsonObject V(string link, Dictionary<string, string> f, params string[] apps)
         {
-            var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Doh = doh, Apps = A(apps), Lists = f.Keys.ToList() };
+            var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Apps = A(apps), Lists = f.Keys.ToList() };
             return JsonNode.Parse(ConfigBuilder.BuildVless(st, 9090, "t", srv, f))!.AsObject();
         }
 
-        var c = V(reality, "quad9", files, @"C:\a\chrome.exe");
+        var c = V(reality, files, @"C:\a\chrome.exe");
         var ob = Obj(Arr(c["outbounds"])[0]);
         Check(Str(ob["type"]) == "vless" && Str(ob["tag"]) == "proxy" && Str(ob["server"]) == "203.0.113.5" && (int)ob["server_port"]! == 443
             && Str(ob["uuid"]) == U && Str(ob["flow"]) == "xtls-rprx-vision" && Str(ob["packet_encoding"]) == "xudp", "VLESS: outbound vless, server, uuid, flow, xudp");
@@ -138,38 +138,32 @@ static class Program
         Check(Str(Arr(Obj(rules[iIp])["ip_cidr"])[0]) == "203.0.113.5/32" && Str(Obj(rules[iIp])["outbound"]) == "direct"
             && Str(Obj(rules[iPn])["outbound"]) == "proxy" && Str(Arr(Obj(rules[iRs])["rule_set"])[0]) == "russia_inside" && Str(Obj(rules[iRs])["outbound"]) == "proxy", "VLESS: содержимое правил");
         var rt = Obj(c["route"]);
-        Check(Str(rt["final"]) == "direct" && rt["auto_detect_interface"]!.GetValue<bool>() && Str(rt["default_domain_resolver"]) == "doh", "VLESS: final direct, default_domain_resolver doh");
+        Check(Str(rt["final"]) == "direct" && rt["auto_detect_interface"]!.GetValue<bool>() && Str(rt["default_domain_resolver"]) == "dns", "VLESS: final direct, default_domain_resolver dns");
         Check(Obj(Arr(c["inbounds"])[0])["strict_route"]!.GetValue<bool>(), "VLESS: strict_route true");
 
-        var w = V(wsLink, "quad9", files, @"C:\a\chrome.exe");
+        var w = V(wsLink, files, @"C:\a\chrome.exe");
         var wo = Obj(Arr(w["outbounds"])[0]);
         var tr = Obj(wo["transport"]);
         Check(Str(tr["type"]) == "ws" && Str(tr["path"]) == "/ws?ed=2048" && Str(Obj(tr["headers"])["Host"]) == "cdn.example.com", "VLESS: ws transport");
         var wt = Obj(wo["tls"]);
         Check(Arr(wt["alpn"]).Select(x => Str(x)).SequenceEqual(new[] { "h2", "http/1.1" }) && !wt.ContainsKey("reality") && !wt.ContainsKey("insecure") && !wo.ContainsKey("flow"), "VLESS: tls+ws, alpn, нет reality");
 
-        var plain = V($"vless://{U}@h.example.com:80", "quad9", files, @"C:\a\chrome.exe");
+        var plain = V($"vless://{U}@h.example.com:80", files, @"C:\a\chrome.exe");
         Check(!Obj(Arr(plain["outbounds"])[0]).ContainsKey("tls"), "VLESS: без security нет tls");
 
         var dq = Arr(Obj(c["dns"])["servers"]);
         var d0 = Obj(dq[0]);
-        Check(dq.Count == 1 && Str(d0["type"]) == "https" && Str(d0["tag"]) == "doh" && Str(d0["server"]) == "9.9.9.9" && Str(d0["path"]) == "/dns-query"
-            && Str(d0["detour"]) == "proxy" && !d0.ContainsKey("server_port") && !d0.ContainsKey("domain_resolver") && Str(Obj(c["dns"])["final"]) == "doh"
-            && !Obj(c["dns"]).ToJsonString().Contains("\"type\":\"local\""), "VLESS DNS quad9: один сервер doh через proxy, final doh, нет local");
-        var cd = V(reality, "controld", files, @"C:\a\chrome.exe");
-        var cs = Arr(Obj(cd["dns"])["servers"]).Select(Obj).ToList();
-        var cdoh = cs.First(x => Str(x["tag"]) == "doh");
-        var cbs = cs.First(x => Str(x["tag"]) == "bootstrap");
-        Check(Str(cdoh["server"]) == "freedns.controld.com" && Str(cdoh["path"]) == "/p0" && Str(cdoh["domain_resolver"]) == "bootstrap" && Str(cdoh["detour"]) == "proxy"
-            && Str(cbs["server"]) == "9.9.9.9" && Str(cbs["path"]) == "/dns-query" && Str(cbs["detour"]) == "proxy" && Str(cbs["type"]) == "https", "VLESS DNS controld: bootstrap");
+        Check(dq.Count == 1 && Str(d0["type"]) == "tcp" && Str(d0["tag"]) == "dns" && Str(d0["server"]) == "1.1.1.1" && Str(d0["detour"]) == "proxy"
+            && Str(Obj(c["dns"])["final"]) == "dns" && Str(Obj(c["route"])["default_domain_resolver"]) == "dns"
+            && !Obj(c["dns"]).ToJsonString().Contains("\"type\":\"local\""), "VLESS DNS: один сервер 1.1.1.1 по tcp через proxy, нет local");
 
-        var onlyLists = Arr(Obj(V(reality, "quad9", files)["route"])["rules"]);
+        var onlyLists = Arr(Obj(V(reality, files)["route"])["rules"]);
         Check(IndexOfRule(onlyLists, "process_name") < 0 && IndexOfRule(onlyLists, "rule_set") >= 0, "VLESS: только списки, нет process_name");
-        var onlyApp = V(reality, "quad9", new Dictionary<string, string>(), @"C:\a\chrome.exe");
+        var onlyApp = V(reality, new Dictionary<string, string>(), @"C:\a\chrome.exe");
         Check(IndexOfRule(Arr(Obj(onlyApp["route"])["rules"]), "rule_set") < 0 && !Obj(onlyApp["route"]).ContainsKey("rule_set"), "VLESS: только программа, нет rule_set");
 
         bool threw = false;
-        try { V(reality, "quad9", new Dictionary<string, string>()); } catch (InvalidOperationException) { threw = true; }
+        try { V(reality, new Dictionary<string, string>()); } catch (InvalidOperationException) { threw = true; }
         Check(threw, "VLESS: нет программ и списков -> исключение");
 
         SingBoxCheck(reality, wsLink, srv);
@@ -205,9 +199,9 @@ static class Program
             File.WriteAllText(src, "{\"version\":3,\"rules\":[{\"domain_suffix\":[\"example.com\"]}]}");
             Check(Run("rule-set", "compile", "--output", srs, src) == 0 && File.Exists(srs), "sing-box rule-set compile");
             var f = new Dictionary<string, string> { ["russia_inside"] = srs };
-            foreach (var (name, link, doh) in new[] { ("reality", reality.Replace("PUBKEY", "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0"), "quad9"), ("ws+controld", wsLink, "controld") })
+            foreach (var (name, link) in new[] { ("reality", reality.Replace("PUBKEY", "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0")), ("ws", wsLink) })
             {
-                var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Doh = doh, Apps = A(@"C:\a\chrome.exe") };
+                var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Apps = A(@"C:\a\chrome.exe") };
                 var cfg = Path.Combine(tmp, name + ".json");
                 File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", srv, f));
                 Check(Run("check", "-c", cfg) == 0, "sing-box check: " + name);
@@ -222,19 +216,19 @@ static class Program
         var p = Path.GetTempFileName();
         File.WriteAllText(p, """{"Ip":"10.0.0.1","Port":1080,"Apps":[{"Path":"C:\\a\\x.exe","Enabled":true}],"DirectPort":1819,"DirectApps":[{"Path":"C:\\b\\y.exe","Enabled":true}]}""");
         var v3 = Settings.Load(p);
-        Check(v3.Mode == ProxyMode.Socks5 && v3.VlessLink == "" && v3.Doh == "quad9" && v3.Lists.Count == 0 && v3.Apps.Count == 1 && v3.DirectApps.Count == 1 && v3.DirectPort == 1819,
+        Check(v3.Mode == ProxyMode.Socks5 && v3.VlessLink == "" && v3.Lists.Count == 0 && v3.Apps.Count == 1 && v3.DirectApps.Count == 1 && v3.DirectPort == 1819,
             "Settings v4: файл v3 читается, новые поля по умолчанию");
 
-        var s = new Settings { Mode = ProxyMode.Vless, VlessLink = Link, Doh = "dnssb", Lists = new List<string> { "youtube", "telegram" } };
+        var s = new Settings { Mode = ProxyMode.Vless, VlessLink = Link, Lists = new List<string> { "youtube", "telegram" } };
         s.Save(p);
         Check(File.ReadAllText(p).Contains("\"Mode\": \"Vless\""), "Settings v4: Mode пишется строкой");
         var b = Settings.Load(p);
-        Check(b.Mode == ProxyMode.Vless && b.VlessLink == Link && b.Doh == "dnssb" && b.Lists.SequenceEqual(new[] { "youtube", "telegram" }),
+        Check(b.Mode == ProxyMode.Vless && b.VlessLink == Link && b.Lists.SequenceEqual(new[] { "youtube", "telegram" }),
             "Settings v4: туда и обратно");
 
-        File.WriteAllText(p, """{"Mode":"vless","Doh":"adguard","Lists":["youtube","nope","YOUTUBE",5]}""");
+        File.WriteAllText(p, """{"Mode":"vless","Doh":"quad9","Lists":["youtube","nope","YOUTUBE",5]}""");
         var d = Settings.Load(p);
-        Check(d.Mode == ProxyMode.Vless && d.Doh == "quad9" && d.Lists.SequenceEqual(new[] { "youtube" }), "Settings v4: мусор в Mode/Doh/Lists отфильтрован");
+        Check(d.Mode == ProxyMode.Vless && d.Lists.SequenceEqual(new[] { "youtube" }), "Settings v4: мусор в Lists отфильтрован, старое поле Doh не мешает");
         File.Delete(p);
 
         Check(new Settings { Mode = ProxyMode.Vless }.Validate() == "Вставьте VLESS-ссылку в настройках", "Validate Vless: пустая ссылка");
@@ -244,15 +238,11 @@ static class Program
 
         var c = s.Clone();
         c.Lists.Add("discord");
-        Check(c.Mode == ProxyMode.Vless && c.VlessLink == Link && c.Doh == "dnssb" && s.Lists.Count == 2, "Clone: новые поля, список копии независим");
+        Check(c.Mode == ProxyMode.Vless && c.VlessLink == Link && s.Lists.Count == 2, "Clone: новые поля, список копии независим");
     }
 
     static void CatalogsTests()
     {
-        Check(Catalogs.Doh.Count == 10 && Catalogs.Doh.Select(d => d.Id).Distinct().Count() == 10, "Catalogs: 10 серверов DoH, id уникальны");
-        Check(Catalogs.DohById("cloudflare").Label == "Cloudflare · 1.1.1.1" && Catalogs.DohById("google").Label == "Google · 8.8.8.8", "Catalogs: Cloudflare и Google по IP");
-        Check(Catalogs.DohById("x").Id == "quad9" && Catalogs.DohById(null).Id == "quad9", "Catalogs: неизвестный DoH -> quad9");
-        Check(Catalogs.DohById("quad9").Label == "Quad9 · 9.9.9.9", "Catalogs: Label по хосту из Url");
         Check(Catalogs.Lists.Count == 25 && Catalogs.Lists.Select(l => l.Id).Distinct().Count() == 25, "Catalogs: 25 уникальных списков");
         Check(Catalogs.Lists.All(l => Catalogs.Groups.Contains(l.Group)), "Catalogs: группа каждого списка известна");
         var inRu = Catalogs.Lists.Where(l => l.InRussiaInside).Select(l => l.Id).OrderBy(x => x).ToArray();
@@ -522,9 +512,9 @@ static class Program
         v.SetVless("http://x");
         Check(v.VlessHost == "" && v.VlessSummary == "Ссылка должна начинаться с vless://" && v.VlessLinkError, "ViewState.SetVless: битая ссылка");
 
-        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 2, 3, "Quad9") == "00:12:03 · 2 приложения · 3 списка · DNS Quad9", "DetailVless: всё");
-        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 1, 0, "Quad9") == "00:12:03 · 1 приложение · DNS Quad9", "DetailVless: без списков");
-        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 0, 5, "Quad9") == "00:12:03 · 5 списков · DNS Quad9", "DetailVless: без приложений");
+        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 2, 3) == "00:12:03 · 2 приложения · 3 списка", "DetailVless: всё");
+        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 1, 0) == "00:12:03 · 1 приложение", "DetailVless: без списков");
+        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 0, 5) == "00:12:03 · 5 списков", "DetailVless: без приложений");
 
         var forms = new (int, string)[] { (1, "1 приложение"), (2, "2 приложения"), (5, "5 приложений"), (11, "11 приложений"), (12, "12 приложений"), (21, "21 приложение"), (22, "22 приложения"), (25, "25 приложений"), (111, "111 приложений"), (112, "112 приложений") };
         Check(forms.All(f => Format.Plural(f.Item1, "приложение", "приложения", "приложений") == f.Item2), "Format.Plural: русские формы");
@@ -558,14 +548,14 @@ static class Program
         l.RequestSetListEnabled("discord", true);
         Check(lev == 1, "ViewState: обычная строка — событие");
 
-        var r = new ViewState { Doh = "quad9" };
+        var r = new ViewState();
         r.SetVless("vless://11111111-1111-1111-1111-111111111111@example.com:443?security=tls&type=tcp#n");
-        int ve = 0; string? gl = null, gd = null;
-        r.SetVlessRequested += (a, b) => { ve++; gl = a; gd = b; };
-        r.RequestSetVless(r.VlessLink, "quad9");
+        int ve = 0; string? gl = null;
+        r.SetVlessRequested += a => { ve++; gl = a; };
+        r.RequestSetVless(r.VlessLink);
         Check(ve == 0, "ViewState: RequestSetVless без изменений — события нет");
-        r.RequestSetVless(r.VlessLink, "dnssb");
-        Check(ve == 1 && gd == "dnssb", "ViewState: RequestSetVless с изменением");
+        r.RequestSetVless("vless://x");
+        Check(ve == 1 && gl == "vless://x", "ViewState: RequestSetVless с изменением");
         int me = 0;
         r.SetModeRequested += _ => me++;
         r.RequestSetMode(ProxyMode.Vless);
@@ -853,18 +843,18 @@ static class Program
             path.StartsWith("/dns/query") ? (200, good) : null;
         var ready = TimeSpan.FromSeconds(1);
 
-        Check(VlessProbe.AfterStart(Fake(Ok), "Quad9", CancellationToken.None, ready) == null, "VlessProbe: всё хорошо -> null");
+        Check(VlessProbe.AfterStart(Fake(Ok), CancellationToken.None, ready) == null, "VlessProbe: всё хорошо -> null");
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var e = VlessProbe.AfterStart(Fake(_ => null), "Quad9", CancellationToken.None, TimeSpan.FromMilliseconds(300));
+        var e = VlessProbe.AfterStart(Fake(_ => null), CancellationToken.None, TimeSpan.FromMilliseconds(300));
         Check(e == "sing-box не запустился, подробности в логе" && sw.ElapsedMilliseconds < 1000, "VlessProbe: Clash API молчит -> не запустился, быстро");
-        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/proxies") ? (504, "") : Ok(p)), "Quad9", CancellationToken.None, ready) == "VLESS-сервер не отвечает", "VlessProbe: delay 504");
-        const string dohErr = "DoH-сервер Quad9 не отвечает, выберите другой в настройках";
-        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/dns") ? (500, "{}") : Ok(p)), "Quad9", CancellationToken.None, ready) == dohErr, "VlessProbe: dns 500");
-        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/dns") ? (200, "{\"Status\":2}") : Ok(p)), "Quad9", CancellationToken.None, ready) == dohErr, "VlessProbe: dns без ответа");
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/proxies") ? (504, "") : Ok(p)), CancellationToken.None, ready) == "VLESS-сервер не отвечает", "VlessProbe: delay 504");
+        const string dohErr = "DNS через VLESS-сервер не отвечает";
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/dns") ? (500, "{}") : Ok(p)), CancellationToken.None, ready) == dohErr, "VlessProbe: dns 500");
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/dns") ? (200, "{\"Status\":2}") : Ok(p)), CancellationToken.None, ready) == dohErr, "VlessProbe: dns без ответа");
         using var cts = new CancellationTokenSource();
         cts.Cancel();
         sw.Restart();
-        Check(VlessProbe.AfterStart((p, c) => c.IsCancellationRequested ? null : Ok(p), "Quad9", cts.Token, ready) != null && sw.ElapsedMilliseconds < 500, "VlessProbe: отмена -> не null сразу");
+        Check(VlessProbe.AfterStart((p, c) => c.IsCancellationRequested ? null : Ok(p), cts.Token, ready) != null && sw.ElapsedMilliseconds < 500, "VlessProbe: отмена -> не null сразу");
 
         Check(VlessProbe.DnsAnswered(good), "DnsAnswered: Status 0 и Answer");
         Check(!VlessProbe.DnsAnswered("{\"Status\":0}") && !VlessProbe.DnsAnswered("{\"Status\":3,\"Answer\":[{}]}")
@@ -989,7 +979,7 @@ static class Program
         Apps = A(@"C:\a\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe") };
 
     const string Reality = "vless://3f1c0a52-0000-4000-8000-000000000001@203.0.113.5:443?security=reality&sni=www.microsoft.com&pbk=PUBKEY&sid=ab12&type=tcp&flow=xtls-rprx-vision";
-    const string Doh9Down = "DoH-сервер Quad9 не отвечает, выберите другой в настройках";
+    const string DnsDown = "DNS через VLESS-сервер не отвечает";
 
     // VLESS: reality на 203.0.113.5:443, одна программа и список YouTube
     static Settings Vless1() => new Settings { Mode = ProxyMode.Vless, VlessLink = Reality, Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "youtube" } };
@@ -1397,9 +1387,9 @@ static class Program
                       && ss.Warnings.Count == 0 && ss.Error == null && ss.ConnectedSince != null, "Session VLESS: успешное подключение");
                 Check(Str(ob["type"]) == "vless" && Str(ob["server"]) == "203.0.113.5" && CfgLists(cfg).SequenceEqual(new[] { "youtube" }) && fv.Resolves == 0,
                     "Session VLESS: в конфиге outbound vless на IP из ссылки и rule_set youtube");
-                lock (fv.DohNames)
-                    Check(fv.AfterStarts == 1 && fv.DohNames.SequenceEqual(new[] { "Quad9" }) && Str(ca["external_controller"]) == "127.0.0.1:" + fv.ApiPort
-                          && Str(ca["secret"]) == fv.ApiSecret, "Session VLESS: проверка после запуска один раз, DoH Quad9, Clash API из конфига");
+                lock (fv.Api)
+                    Check(fv.AfterStarts == 1 && Str(ca["external_controller"]) == "127.0.0.1:" + fv.ApiPort
+                          && Str(ca["secret"]) == fv.ApiSecret, "Session VLESS: проверка после запуска один раз, Clash API из конфига");
             }
             {
                 var fb = new FakeSingBox();
@@ -1437,11 +1427,11 @@ static class Program
             }
             {
                 var fb = new FakeSingBox();
-                var fv = new FakeVless(root, afterStart: (_, _, _, _) => Doh9Down);
+                var fv = new FakeVless(root, afterStart: (_, _, _) => DnsDown);
                 using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay, fv.Deps);
                 ss.ConnectAsync().Wait(2000);
-                Check(ss.State == ConnState.Disconnected && ss.Error == Doh9Down && fb.Starts == 1 && !fb.Running && ss.Warnings.Count == 0,
-                    "Session VLESS: DoH не ответил после запуска -> sing-box остановлен, ошибка как есть");
+                Check(ss.State == ConnState.Disconnected && ss.Error == DnsDown && fb.Starts == 1 && !fb.Running && ss.Warnings.Count == 0,
+                    "Session VLESS: DNS не ответил после запуска -> sing-box остановлен, ошибка как есть");
             }
             {
                 var fb = new FakeSingBox();
@@ -1563,7 +1553,7 @@ static class Program
                 // Review Focus 4: «Отключить» во время проверки после запуска
                 var fb = new FakeSingBox();
                 using var started = new ManualResetEventSlim();
-                var fv = new FakeVless(root, afterStart: (_, _, _, ct) => { started.Set(); ct.WaitHandle.WaitOne(5000); return "VLESS-сервер не отвечает"; });
+                var fv = new FakeVless(root, afterStart: (_, _, ct) => { started.Set(); ct.WaitHandle.WaitOne(5000); return "VLESS-сервер не отвечает"; });
                 using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay, fv.Deps);
                 var t = ss.ConnectAsync();
                 bool inCheck = started.Wait(2000);
@@ -1580,7 +1570,7 @@ static class Program
                 var s = Vless1();
                 int calls = 0;
                 using var started = new ManualResetEventSlim();
-                var fv = new FakeVless(root, afterStart: (_, _, _, ct) =>
+                var fv = new FakeVless(root, afterStart: (_, _, ct) =>
                 {
                     if (Interlocked.Increment(ref calls) == 1) return null;
                     started.Set(); // проверка после перезапуска висит
@@ -1603,7 +1593,7 @@ static class Program
                 var fb = new FakeSingBox();
                 var s = Vless1();
                 int calls = 0;
-                var fv = new FakeVless(root, afterStart: (_, _, _, _) => Interlocked.Increment(ref calls) == 1 ? null : Doh9Down);
+                var fv = new FakeVless(root, afterStart: (_, _, _) => Interlocked.Increment(ref calls) == 1 ? null : DnsDown);
                 using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
                 var logs = new List<string>();
                 ss.Log += l => { lock (logs) logs.Add(l); };
@@ -1612,8 +1602,8 @@ static class Program
                 ss.AppsChanged();
                 Thread.Sleep(300);
                 lock (logs)
-                    Check(ss.State == ConnState.Disconnected && ss.Error == Doh9Down && !fb.Running && fb.Starts == 2 && logs.Contains(Doh9Down),
-                        "Session VLESS: DoH не ответил при перезапуске -> sing-box остановлен, ошибка");
+                    Check(ss.State == ConnState.Disconnected && ss.Error == DnsDown && !fb.Running && fb.Starts == 2 && logs.Contains(DnsDown),
+                        "Session VLESS: DNS не ответил при перезапуске -> sing-box остановлен, ошибка");
             }
             {
                 var fb = new FakeSingBox();
@@ -1729,19 +1719,19 @@ sealed class FakeSingBox : ISingBox
     public void LateExited() => Exited?.Invoke(); // Exited прежнего процесса пришёл, когда новый уже работает
 }
 
-// Подмена VlessDeps: считает вызовы, запоминает id списков и имена DoH. По умолчанию имя не разрешается,
+// Подмена VlessDeps: считает вызовы, запоминает id списков и адрес Clash API. По умолчанию имя не разрешается,
 // сервер отвечает, каждый список — существующий файл в dir, проверка после запуска проходит.
 sealed class FakeVless
 {
     public int Resolves, Reaches, Prepares, AfterStarts;
     public readonly List<string[]> Prepared = new();  // под lock (Prepared)
-    public readonly List<string> DohNames = new();    // под lock (DohNames), как и ApiPort/ApiSecret
+    public readonly object Api = new();               // под lock (Api) — ApiPort/ApiSecret
     public int ApiPort;
     public string? ApiSecret;
     public readonly VlessDeps Deps;
 
     public FakeVless(string dir, Func<string, IPAddress?>? resolve = null, Func<IPAddress, int, string?>? reach = null,
-        Func<IReadOnlyList<string>, ListsResult>? lists = null, Func<int, string, string, CancellationToken, string?>? afterStart = null)
+        Func<IReadOnlyList<string>, ListsResult>? lists = null, Func<int, string, CancellationToken, string?>? afterStart = null)
     {
         Deps = new VlessDeps
         {
@@ -1763,11 +1753,11 @@ sealed class FakeVless
                     return new ListsResult(files, Array.Empty<string>(), Array.Empty<string>());
                 }
             },
-            AfterStart = (port, secret, doh, ct) =>
+            AfterStart = (port, secret, ct) =>
             {
                 Interlocked.Increment(ref AfterStarts);
-                lock (DohNames) { DohNames.Add(doh); ApiPort = port; ApiSecret = secret; }
-                return afterStart?.Invoke(port, secret, doh, ct);
+                lock (Api) { ApiPort = port; ApiSecret = secret; }
+                return afterStart?.Invoke(port, secret, ct);
             }
         };
     }

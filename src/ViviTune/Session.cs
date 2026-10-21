@@ -21,8 +21,8 @@ public sealed class VlessDeps
     public required Func<string, IPAddress?> Resolve { get; init; }        // имя -> IP; null — не нашлось
     public required Func<IPAddress, int, string?> Reach { get; init; }     // TCP до сервера: null — ответил, иначе причина
     public required Func<IReadOnlyList<string>, ListsResult> PrepareLists { get; init; }
-    // после запуска sing-box: (порт Clash API, секрет, имя DoH, отмена) -> null или текст ошибки для пользователя
-    public required Func<int, string, string, CancellationToken, string?> AfterStart { get; init; }
+    // после запуска sing-box: (порт Clash API, секрет, отмена) -> null или текст ошибки для пользователя
+    public required Func<int, string, CancellationToken, string?> AfterStart { get; init; }
 }
 
 // Проверка после запуска sing-box не прошла: текст для пользователя как есть, без «Не удалось запустить: ».
@@ -42,7 +42,7 @@ public sealed record Verdict(Exits Live, IReadOnlyList<string> Warnings, string?
 // поэтому Exited, пришедший из любого потока, не может зависнуть на gate).
 // Проверка выходов (до ~3 с на выход) идёт вне всех блокировок; после неё под ops + gate заново смотрим
 // attempt/ticket и состояние: за это время могли отключить или изменить список.
-// В VLESS проверка после запуска (сервер и DoH через Clash API) идёт под ops, между Start и счётчиком скорости;
+// В VLESS проверка после запуска (сервер и DNS через Clash API) идёт под ops, между Start и счётчиком скорости;
 // её отмену (cts) берём под gate вместе с attempt/ticket, Disconnect отменяет её до того, как ждать ops.
 // Настройки копируются в потоке вызывающего (ConnectAsync/AppsChanged): живой Settings из фона не читается.
 // Обработчики событий не должны блокироваться на UI-потоке (Post, а не Invoke).
@@ -431,7 +431,7 @@ public sealed class Session : IDisposable
     // Строка лога, за ней предупреждения с префиксом.
     static string?[] WithWarnings(string msg, Verdict v) => [msg, .. v.Warnings.Select(w => WarnPrefix + w)];
 
-    // Вызывать под ops. В VLESS после запуска — проверка сервера и DoH через Clash API (ct отменяет её при Disconnect);
+    // Вызывать под ops. В VLESS после запуска — проверка сервера и DNS через Clash API (ct отменяет её при Disconnect);
     // не прошла — CheckFailedException, sing-box останавливает вызывающий. Счётчик скорости — только после неё.
     TrafficMeter StartSingBox(Settings snap, Verdict v, CancellationToken ct)
     {
@@ -441,7 +441,7 @@ public sealed class Session : IDisposable
             ? ConfigBuilder.BuildVless(snap, port, secret, p.Server, p.ListFiles)
             : ConfigBuilder.Build(snap, port, secret, v.Live));
         sb.Start(configPath);
-        if (v.Vless != null && vless!.AfterStart(port, secret, Catalogs.DohById(snap.Doh).Name, ct) is { } err)
+        if (v.Vless != null && vless!.AfterStart(port, secret, ct) is { } err)
             throw new CheckFailedException(err);
         var m = new TrafficMeter(port, secret);
         m.Sample += s => OnSample(m, s);
