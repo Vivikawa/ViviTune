@@ -29,21 +29,16 @@ namespace ViviTune.Ui
             var runner = new Runner(Path.Combine(dir, "sing-box.exe"));
             var session = new Session(settings, runner, Path.Combine(dir, "config.json"), ProxyProbe.Probe, TimeSpan.FromSeconds(1), new VlessDeps
             {
-                Resolve = name =>
-                {
-                    try
-                    {
-                        var all = System.Net.Dns.GetHostAddresses(name);
-                        return all.FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? all.FirstOrDefault();
-                    }
-                    catch { return null; }
-                },
+                // сначала IPv4; исключения ловит Session
+                Resolve = name => System.Net.Dns.GetHostAddresses(name).OrderBy(a => a.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork).FirstOrDefault(),
                 Reach = ProxyProbe.Reach,
                 PrepareLists = ids => ListStore.Prepare(Path.Combine(dir, "lists"), ids, ListStore.Download, DateTime.UtcNow),
                 AfterStart = (p, s, d, ct) => VlessProbe.AfterStart(p, s, d, ct) ?? Flush()
             });
             // Очистка кэша DNS — по возможности: экспорт недокументирован, его сбой не должен ронять запуск.
             static string? Flush() { try { Native.FlushDns(); } catch { } return null; }
+            // папка недоступна для записи: работаем без сохранения
+            void Save() { try { settings.Save(settingsPath); } catch (Exception) { } }
             var state = new ViewState
             {
                 Ip = settings.Ip,
@@ -96,8 +91,7 @@ namespace ViviTune.Ui
                 if (!change(apps, direct)) return;
                 settings.Apps = apps;
                 settings.DirectApps = direct;
-                try { settings.Save(settingsPath); }
-                catch (Exception) { } // папка недоступна для записи: работаем без сохранения
+                Save();
                 SyncRows(apps, direct);
                 QueueAppsChanged();
             }
@@ -107,8 +101,7 @@ namespace ViviTune.Ui
                 var ids = settings.Lists.ToHashSet();
                 if (!(on ? ids.Add(id) : ids.Remove(id))) return;
                 settings.Lists = Catalogs.Lists.Where(l => ids.Contains(l.Id)).Select(l => l.Id).ToList();
-                try { settings.Save(settingsPath); }
-                catch (Exception) { } // папка недоступна для записи: работаем без сохранения
+                Save();
                 state.SyncLists(settings.Lists);
                 QueueAppsChanged();
             };
@@ -170,8 +163,7 @@ namespace ViviTune.Ui
                 if (session.State != ConnState.Disconnected) return; // режим меняется только без подключения
                 settings.Mode = mode;
                 state.Mode = mode;
-                try { settings.Save(settingsPath); }
-                catch (Exception) { } // папка недоступна для записи: работаем без сохранения
+                Save();
             };
             state.SetVlessRequested += (link, dohId) =>
             {
@@ -180,8 +172,7 @@ namespace ViviTune.Ui
                 settings.Doh = Catalogs.DohById(dohId).Id;
                 state.SetVless(link);
                 state.Doh = settings.Doh;
-                try { settings.Save(settingsPath); }
-                catch (Exception) { }
+                Save();
             };
             state.SetProxyRequested += (ip, port, direct) =>
             {
@@ -193,8 +184,7 @@ namespace ViviTune.Ui
                 state.Port = port;
                 state.DirectPort = direct;
                 state.SettingsError = Settings.ValidateProxy(ip, port) ?? Settings.ValidateDirectPort(direct, port);
-                try { settings.Save(settingsPath); }
-                catch (Exception) { } // папка недоступна для записи: работаем без сохранения
+                Save();
             };
 
             var window = new MainWindow(state);

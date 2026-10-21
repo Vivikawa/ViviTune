@@ -161,12 +161,9 @@ namespace ViviTune
             config["dns"] = D("servers", dnsServers.ToArray(), "final", "doh");
             config["inbounds"] = Tun(true);
             config["outbounds"] = new object[] { proxy, D("type", "direct", "tag", "direct") };
-            var route = D("rules", rules.ToArray());
+            var route = D("rules", rules.ToArray(), "final", "direct", "auto_detect_interface", true, "default_domain_resolver", "doh");
             if (lists.Length > 0)
                 route["rule_set"] = lists.Select(id => (object)D("type", "local", "tag", id, "format", "binary", "path", listFiles[id])).ToArray();
-            route["final"] = "direct";
-            route["auto_detect_interface"] = true;
-            route["default_domain_resolver"] = "doh";
             config["route"] = route;
             return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
         }

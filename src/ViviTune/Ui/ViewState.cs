@@ -105,7 +105,7 @@ public sealed class ViewState : INotifyPropertyChanged
     public bool DirectTab
     {
         get => directTab;
-        set { if (Set(ref directTab, value)) Notify(nameof(ShownApps), nameof(EmptyText), nameof(DirectHintVisible), nameof(ExitDownHint), nameof(SitesTab), nameof(AppListVisible)); }
+        set { if (Set(ref directTab, value)) Notify(nameof(ShownApps), nameof(EmptyText), nameof(DirectHintVisible), nameof(ExitDownHint), nameof(SitesTab)); }
     }
 
     public ProxyMode Mode
@@ -115,13 +115,12 @@ public sealed class ViewState : INotifyPropertyChanged
         {
             if (!Set(ref mode, value)) return;
             Notify(nameof(IsVless), nameof(ProxyLabel), nameof(ProxyTabText), nameof(DirectTabText), nameof(EmptyText), nameof(DirectHintVisible),
-                nameof(ExitDownHint), nameof(StatusText), nameof(UpLabel), nameof(DownLabel), nameof(SitesTab), nameof(AppListVisible));
+                nameof(ExitDownHint), nameof(StatusText), nameof(UpLabel), nameof(DownLabel), nameof(SitesTab));
         }
     }
     public bool IsVless => mode == ProxyMode.Vless;
     // VLESS: вкладка «Сайты» показывает списки ITDog вместо программ
     public bool SitesTab => IsVless && directTab;
-    public bool AppListVisible => !SitesTab;
 
     public string VlessHost { get => vlessHost; private set { if (Set(ref vlessHost, value)) Notify(nameof(ProxyLabel)); } }
     public string VlessLink { get => vlessLink; private set => Set(ref vlessLink, value); }
@@ -388,10 +387,9 @@ public sealed class ListRow : INotifyPropertyChanged
     public bool Covered
     {
         get => covered;
-        set { if (covered == value) return; covered = value; Raise(nameof(Covered), nameof(Shown), nameof(CanToggle), nameof(Note)); }
+        set { if (covered == value) return; covered = value; Raise(nameof(Covered), nameof(Shown), nameof(Note)); }
     }
     public bool Shown => enabled || covered;
-    public bool CanToggle => !covered;
 
     void Raise(params string[] names)
     {

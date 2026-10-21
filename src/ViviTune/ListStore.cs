@@ -30,8 +30,8 @@ namespace ViviTune
                 try
                 {
                     var data = download(id);
-                    if (data.Length < 4 || data[0] != 0x53 || data[1] != 0x52 || data[2] != 0x53) throw new InvalidDataException("не SRS");
-                    if (data[3] > 3) throw new InvalidDataException("версия SRS новее поддерживаемой sing-box 1.12.12");
+                    // магия SRS и версия формата: sing-box 1.12.12 читает до 3
+                    if (data.Length < 4 || !data.AsSpan(0, 3).SequenceEqual("SRS"u8) || data[3] > 3) throw new InvalidDataException("не SRS 1–3");
                     var tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
                     try
                     {
@@ -47,7 +47,8 @@ namespace ViviTune
                     else failed.Add(id);
                 }
             });
-            return new ListsResult(files, failed.ToList(), stale.ToList());
+            // в порядке ids (качали параллельно): предупреждения и лог идут в порядке настроек
+            return new ListsResult(files, ids.Where(failed.Contains).ToList(), ids.Where(stale.Contains).ToList());
         }
 
         public static byte[] Download(string id)

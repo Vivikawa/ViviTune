@@ -8,10 +8,8 @@ namespace ViviTune.Windows
         public static void AllowAnyForeground() => AllowSetForegroundWindow(-1); // ASFW_ANY
 
         // После подключения старые ответы DNS из кэша Windows могут вести мимо туннеля.
-        public static void FlushDns() => DnsFlushResolverCache();
-
         [DllImport("dnsapi.dll", EntryPoint = "DnsFlushResolverCache")]
-        static extern void DnsFlushResolverCache();
+        public static extern void FlushDns();
 
         [DllImport("user32.dll")]
         static extern bool AllowSetForegroundWindow(int processId);

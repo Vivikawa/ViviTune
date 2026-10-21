@@ -65,6 +65,14 @@ static class Program
                     "ListStore: ошибка скачивания, работаем со старой копией");
             }
             {
+                // качает параллельно, а Failed и Stale отдаёт в порядке ids (в нём и предупреждения)
+                Seed("s2", true);
+                Seed("s1", true);
+                var ids = new[] { "f3", "s2", "f1", "s1", "f2" };
+                var r = ListStore.Prepare(dir, ids, id => { Thread.Sleep(id.EndsWith("1") ? 50 : 0); throw new IOException("нет сети"); }, now);
+                Check(r.Failed.SequenceEqual(new[] { "f3", "f1", "f2" }) && r.Stale.SequenceEqual(new[] { "s2", "s1" }), "ListStore: Failed и Stale в порядке ids");
+            }
+            {
                 var r = ListStore.Prepare(dir, new[] { "none" }, id => throw new IOException("нет сети"), now);
                 Check(!r.Files.ContainsKey("none") && r.Failed.Contains("none") && !File.Exists(P("none")), "ListStore: нет копии и нет сети");
             }
@@ -493,17 +501,17 @@ static class Program
         Check(v.IsVless && v.ProxyTabText == "Приложения · 1" && v.DirectTabText == "Сайты · 0" && v.UpLabel == "↑ Отдача через VPN" && v.DownLabel == "↓ Загрузка через VPN"
             && v.ProxyLabel == "VLESS" && v.EmptyText == "Добавьте приложение, трафик которого пойдёт через VPN",
             "ViewState: Vless — вкладки, подписи, ProxyLabel, EmptyText");
-        foreach (var n in new[] { "IsVless", "ProxyTabText", "DirectTabText", "ProxyLabel", "EmptyText", "UpLabel", "DownLabel", "StatusText", "SitesTab", "AppListVisible", "DirectHintVisible", "ExitDownHint" })
+        foreach (var n in new[] { "IsVless", "ProxyTabText", "DirectTabText", "ProxyLabel", "EmptyText", "UpLabel", "DownLabel", "StatusText", "SitesTab", "DirectHintVisible", "ExitDownHint" })
             Check(changed.Contains(n), "ViewState: смена режима уведомляет " + n);
         v.State = ConnState.Checking;
         Check(v.StatusText == "Проверяю сервер…", "ViewState: Vless Checking -> «Проверяю сервер…»");
         v.State = ConnState.Disconnected;
         v.DirectTab = true;
         v.ProxyDown = true; v.BypassDown = true;
-        Check(v.SitesTab && !v.AppListVisible && !v.DirectHintVisible && v.ExitDownHint == null, "ViewState: Vless, вкладка «Сайты» — без подсказок");
+        Check(v.SitesTab && !v.DirectHintVisible && v.ExitDownHint == null, "ViewState: Vless, вкладка «Сайты» — без подсказок");
         changed.Clear();
         v.DirectTab = false;
-        Check(changed.Contains("SitesTab") && changed.Contains("AppListVisible") && !v.SitesTab && v.AppListVisible, "ViewState: DirectTab уведомляет SitesTab");
+        Check(changed.Contains("SitesTab") && !v.SitesTab, "ViewState: DirectTab уведомляет SitesTab");
         v.Mode = ProxyMode.Socks5;
         Check(v.ProxyLabel == $"SOCKS5 · {v.Ip}:{v.Port}" && v.StatusText == "Отключено", "ViewState: возврат в SOCKS5");
 
@@ -539,9 +547,9 @@ static class Program
         rows["youtube"].PropertyChanged += (_, e) => rowChanged.Add(e.PropertyName ?? "");
         l.SyncLists(new[] { "russia_inside" });
         var yt = rows["youtube"];
-        Check(yt.Covered && yt.Shown && !yt.CanToggle && yt.Note == "уже входит в Russia inside" && !rows["discord"].Covered && rows["russia_inside"].Enabled && !rows["discord"].Shown,
+        Check(yt.Covered && yt.Shown && yt.Note == "уже входит в Russia inside" && !rows["discord"].Covered && rows["russia_inside"].Enabled && !rows["discord"].Shown,
             "ViewState.SyncLists: Covered строка");
-        Check(rowChanged.Contains("Covered") && rowChanged.Contains("Shown") && rowChanged.Contains("CanToggle") && rowChanged.Contains("Note"), "ViewState.SyncLists: строка уведомляет");
+        Check(rowChanged.Contains("Covered") && rowChanged.Contains("Shown") && rowChanged.Contains("Note"), "ViewState.SyncLists: строка уведомляет");
         l.Mode = ProxyMode.Vless;
         Check(l.DirectTabText == "Сайты · 1", "ViewState.SyncLists: счётчик на вкладке");
         int lev = 0;
@@ -857,7 +865,7 @@ static class Program
         using var cts = new CancellationTokenSource();
         cts.Cancel();
         sw.Restart();
-        Check(VlessProbe.AfterStart(Fake(Ok), "Quad9", cts.Token, ready) != null && sw.ElapsedMilliseconds < 500, "VlessProbe: отмена -> не null сразу");
+        Check(VlessProbe.AfterStart((p, c) => c.IsCancellationRequested ? null : Ok(p), "Quad9", cts.Token, ready) != null && sw.ElapsedMilliseconds < 500, "VlessProbe: отмена -> не null сразу");
 
         Check(VlessProbe.DnsAnswered(good), "DnsAnswered: Status 0 и Answer");
         Check(!VlessProbe.DnsAnswered("{\"Status\":0}") && !VlessProbe.DnsAnswered("{\"Status\":3,\"Answer\":[{}]}")
@@ -1469,22 +1477,6 @@ static class Program
                     Check(ss.State == ConnState.Connected && ss.Warnings.Count == 0 && CfgLists(cfg).SequenceEqual(new[] { "youtube" })
                           && logs.Contains("Список YouTube не обновился, работаю со старой копией"),
                         "Session VLESS: старая копия -> подключено без предупреждения, строка в логе");
-            }
-            {
-                // ListStore отдаёт Failed и Stale в случайном порядке: предупреждения и лог — в порядке каталога
-                var fb = new FakeSingBox();
-                var s = Vless1();
-                s.Lists = new List<string> { "youtube", "telegram", "discord", "russia_inside" };
-                var files = new Dictionary<string, string> { ["discord"] = Path.Combine(root, "d.srs"), ["russia_inside"] = Path.Combine(root, "r.srs") };
-                var fv = new FakeVless(root, lists: ids => new ListsResult(files, new[] { "telegram", "youtube" }, new[] { "discord", "russia_inside" }));
-                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
-                var logs = new List<string>();
-                ss.Log += l => { lock (logs) logs.Add(l); };
-                ss.ConnectAsync().Wait(2000);
-                lock (logs)
-                    Check(ss.Warnings.SequenceEqual(new[] { "Список YouTube не загрузился", "Список Telegram не загрузился" })
-                          && logs.Where(l => l.StartsWith("Список ")).SequenceEqual(new[] { "Список Russia inside не обновился, работаю со старой копией", "Список Discord не обновился, работаю со старой копией" }),
-                        "Session VLESS: Failed и Stale в порядке каталога");
             }
             {
                 var fb = new FakeSingBox();

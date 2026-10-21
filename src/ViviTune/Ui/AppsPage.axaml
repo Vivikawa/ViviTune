@@ -111,7 +111,7 @@
                             </StackPanel>
                             <!-- OneWay: Enabled меняет только App (по RequestSetListEnabled) -->
                             <ToggleButton Grid.Column="1" Theme="{StaticResource Switch}" VerticalAlignment="Center"
-                                          IsChecked="{Binding Shown, Mode=OneWay}" IsEnabled="{Binding CanToggle}"
+                                          IsChecked="{Binding Shown, Mode=OneWay}" IsEnabled="{Binding !Covered}"
                                           Click="OnListToggle" AutomationProperties.Name="Включено" />
                           </Grid>
                         </Border>
@@ -130,12 +130,12 @@
         <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" Text="{Binding EmptyText}">
           <TextBlock.IsVisible>
             <MultiBinding Converter="{x:Static BoolConverters.And}">
-              <Binding Path="AppListVisible" />
+              <Binding Path="!SitesTab" />
               <Binding Path="!ShownApps.Count" />
             </MultiBinding>
           </TextBlock.IsVisible>
         </TextBlock>
-        <ItemsControl ItemsSource="{Binding ShownApps}" IsVisible="{Binding AppListVisible}">
+        <ItemsControl ItemsSource="{Binding ShownApps}" IsVisible="{Binding !SitesTab}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
               <StackPanel Spacing="8" />
@@ -164,7 +164,7 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
         <Button Name="AddButton" Classes="primary" Content="＋ Добавить" HorizontalAlignment="Left" Margin="0,2,0,0"
-                IsVisible="{Binding AppListVisible}" />
+                IsVisible="{Binding !SitesTab}" />
       </StackPanel>
     </ScrollViewer>
 

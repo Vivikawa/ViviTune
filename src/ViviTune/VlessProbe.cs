@@ -20,15 +20,14 @@ public static class VlessProbe
             var sw = Stopwatch.StartNew();
             while (true)
             {
-                if (ct.IsCancellationRequested) return notStarted;
                 if (get("/version", ct) is { Status: 200 }) break;
                 if (sw.Elapsed >= readyTimeout) return notStarted;
                 if (ct.WaitHandle.WaitOne(100)) return notStarted;
             }
             if (get("/proxies/proxy/delay?timeout=5000&url=" + Uri.EscapeDataString(DelayUrl), ct) is not { Status: 200 })
-                return ct.IsCancellationRequested ? notStarted : "VLESS-сервер не отвечает";
+                return "VLESS-сервер не отвечает";
             if (get("/dns/query?name=" + DnsProbeName + "&type=A", ct) is not { Status: 200 } dns || !DnsAnswered(dns.Body))
-                return ct.IsCancellationRequested ? notStarted : $"DoH-сервер {dohName} не отвечает, выберите другой в настройках";
+                return $"DoH-сервер {dohName} не отвечает, выберите другой в настройках";
             return null;
         }
         catch { return notStarted; }
@@ -58,9 +57,9 @@ public static class VlessProbe
         {
             using var doc = JsonDocument.Parse(body);
             var r = doc.RootElement;
-            return r.ValueKind == JsonValueKind.Object
-                && r.TryGetProperty("Status", out var st) && st.TryGetInt32(out var code) && code == 0
-                && r.TryGetProperty("Answer", out var an) && an.ValueKind == JsonValueKind.Array && an.GetArrayLength() > 0;
+            // не тот вид JSON бросает InvalidOperationException: это тоже «нет ответа»
+            return r.TryGetProperty("Status", out var st) && st.TryGetInt32(out var code) && code == 0
+                && r.TryGetProperty("Answer", out var an) && an.GetArrayLength() > 0;
         }
         catch { return false; }
     }

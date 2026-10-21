@@ -410,8 +410,6 @@ public sealed class Session : IDisposable
         {
             try { lists = vless.PrepareLists(snap.Lists); }
             catch { lists = lists with { Failed = snap.Lists.ToList() }; } // не смогли даже начать: ни один не скачался
-            // ListStore качает параллельно и отдаёт их в случайном порядке: предупреждения и лог — в порядке каталога
-            lists = lists with { Failed = InCatalogOrder(lists.Failed), Stale = InCatalogOrder(lists.Stale) };
         }
         foreach (var id in lists.Stale) Log?.Invoke($"Список {ListName(id)} не обновился, работаю со старой копией");
         return EvaluateVless(snap, ip, lists);
@@ -427,9 +425,6 @@ public sealed class Session : IDisposable
     }
 
     static Verdict ErrorVerdict(string error) => new(default, [], error, null);
-
-    static IReadOnlyList<string> InCatalogOrder(IReadOnlyList<string> ids) =>
-        Catalogs.Lists.Select(l => l.Id).Where(id => ids.Contains(id)).ToList();
 
     static string ListName(string id) => Catalogs.ListById(id)?.Name ?? id;
 

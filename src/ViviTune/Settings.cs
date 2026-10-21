@@ -55,7 +55,7 @@ namespace ViviTune
                         s.Mode = mode.Equals("vless", StringComparison.OrdinalIgnoreCase) ? ProxyMode.Vless : ProxyMode.Socks5;
                     else if (kv.Key.Equals("VlessLink", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue lv && lv.TryGetValue<string>(out var link)) s.VlessLink = link;
                     else if (kv.Key.Equals("Doh", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue hv && hv.TryGetValue<string>(out var doh))
-                        s.Doh = Catalogs.Doh.Any(d => d.Id == doh) ? doh : "quad9";
+                        s.Doh = Catalogs.DohById(doh).Id;
                     else if (kv.Key.Equals("Lists", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonArray larr)
                     {
                         foreach (var item in larr)
