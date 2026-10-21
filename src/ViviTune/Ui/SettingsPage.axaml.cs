@@ -6,6 +6,8 @@ namespace ViviTune.Ui
     // Поля IP и порта: каждое изменение уходит в ViewState.RequestSetProxy (App проверяет и сохраняет).
     public partial class SettingsPage : UserControl
     {
+        bool filling;
+
         public SettingsPage()
         {
             InitializeComponent();
@@ -13,16 +15,40 @@ namespace ViviTune.Ui
             IpBox.TextChanged += (_, _) => Push();
             PortBox.TextChanged += (_, _) => Push();
             DirectPortBox.TextChanged += (_, _) => Push();
+            VlessBox.TextChanged += (_, _) => PushVless();
+            DohBox.SelectionChanged += (_, _) => PushVless();
+        }
+
+        // Страницу показали снова: поля — как в ViewState (ссылку мог поменять App)
+        protected override void OnPropertyChanged(Avalonia.AvaloniaPropertyChangedEventArgs change)
+        {
+            base.OnPropertyChanged(change);
+            if (change.Property == IsVisibleProperty && IsVisible) Fill();
         }
 
         protected override void OnDataContextChanged(EventArgs e)
         {
             base.OnDataContextChanged(e);
+            Fill();
+        }
+
+        void Fill()
+        {
             if (DataContext is not ViewState s) return;
-            // TextChanged от этого заполнения придёт с теми же значениями: RequestSetProxy его пропустит
+            // TextChanged от этого заполнения придёт с теми же значениями: RequestSetProxy и RequestSetVless его пропустят
+            filling = true; // между присвоением ссылки и сервера пара была бы смешанной
+            VlessBox.Text = s.VlessLink;
+            DohBox.SelectedItem = s.DohServers.FirstOrDefault(d => d.Id == s.Doh);
+            filling = false;
             IpBox.Text = s.Ip;
             PortBox.Text = s.Port.ToString(CultureInfo.InvariantCulture);
             DirectPortBox.Text = s.DirectPort?.ToString(CultureInfo.InvariantCulture) ?? "";
+        }
+
+        void PushVless()
+        {
+            if (filling || DataContext is not ViewState s || DohBox.SelectedItem is not DohServer d) return;
+            s.RequestSetVless((VlessBox.Text ?? "").Trim(), d.Id);
         }
 
         void Push()

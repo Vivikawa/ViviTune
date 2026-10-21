@@ -15,5 +15,8 @@ namespace ViviTune.Ui
                 if (powerGuard.TryAccept(Environment.TickCount64)) (DataContext as ViewState)?.RequestToggle();
             };
         }
+
+        void OnSocksMode(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => (DataContext as ViewState)?.RequestSetMode(ProxyMode.Socks5);
+        void OnVlessMode(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => (DataContext as ViewState)?.RequestSetMode(ProxyMode.Vless);
     }
 }

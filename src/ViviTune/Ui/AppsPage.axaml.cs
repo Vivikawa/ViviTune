@@ -135,6 +135,11 @@ namespace ViviTune.Ui
             if (sender is ToggleButton { DataContext: AppRow r } t) State?.RequestSetAppEnabled(r.Path, t.IsChecked == true);
         }
 
+        void OnListToggle(object? sender, RoutedEventArgs e)
+        {
+            if (sender is ToggleButton { DataContext: ListRow r } t) State?.RequestSetListEnabled(r.Id, t.IsChecked == true);
+        }
+
         void OnRemove(object? sender, RoutedEventArgs e)
         {
             if (sender is Control { DataContext: AppRow r } && removeGuard.TryAccept(Environment.TickCount64)) State?.RequestRemoveApp(r.Path);

@@ -53,27 +53,9 @@
       <Setter Property="Background" Value="#252a4d" />
       <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     </Style>
-    <!-- Вкладка сегмента: выбранная — фон LineBrush и светлый текст -->
-    <Style Selector="Button.tab">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="CornerRadius" Value="7" />
-      <Setter Property="Padding" Value="14,6" />
-      <Setter Property="FontSize" Value="12" />
-      <Setter Property="Cursor" Value="Hand" />
-    </Style>
-    <Style Selector="Button.tab:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-    </Style>
-    <Style Selector="Button.tab.on /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{StaticResource LineBrush}" />
-      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-    </Style>
-    <Style Selector="Button.tab.warn.on /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Foreground" Value="{StaticResource WarnBrush}" />
+    <!-- Список, уже входящий в Russia inside: бледнее -->
+    <Style Selector="Border.card.covered">
+      <Setter Property="Opacity" Value="0.5" />
     </Style>
     <!-- Подпись раздела панели -->
     <Style Selector="TextBlock.lab">
@@ -98,13 +80,62 @@
 
     <ScrollViewer Name="ListArea" Grid.Row="1" Margin="0,14,0,0">
       <StackPanel Spacing="8">
+        <!-- VLESS, вкладка «Сайты»: списки ITDog вместо программ -->
+        <StackPanel Spacing="8" IsVisible="{Binding SitesTab}">
+          <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap"
+                     Text="Списки ITDog. Работают для всех программ на компьютере." />
+          <ItemsControl ItemsSource="{Binding ListGroups}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Spacing="8" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="ui:ListGroup">
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="lab" Text="{Binding Title}" Margin="2,6,0,0" />
+                  <ItemsControl ItemsSource="{Binding Rows}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel Spacing="6" />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="ui:ListRow">
+                        <Border Classes="card" Padding="12,9" Classes.covered="{Binding Covered}">
+                          <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel VerticalAlignment="Center">
+                              <TextBlock Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Classes="muted" FontSize="11" Margin="0,1,0,0" Text="{Binding Note}"
+                                         TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <!-- OneWay: Enabled меняет только App (по RequestSetListEnabled) -->
+                            <ToggleButton Grid.Column="1" Theme="{StaticResource Switch}" VerticalAlignment="Center"
+                                          IsChecked="{Binding Shown, Mode=OneWay}" IsEnabled="{Binding CanToggle}"
+                                          Click="OnListToggle" AutomationProperties.Name="Включено" />
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
         <TextBlock Classes="warning" FontSize="13" TextWrapping="Wrap" IsVisible="{Binding DirectHintVisible}"
                    Text="Укажите порт «Мимо Podkop» в настройках, иначе эти программы идут обычным путём." />
         <TextBlock Classes="warning" FontSize="13" TextWrapping="Wrap" IsVisible="{Binding ExitDownHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                    Text="{Binding ExitDownHint}" />
-        <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" IsVisible="{Binding !ShownApps.Count}"
-                   Text="{Binding EmptyText}" />
-        <ItemsControl ItemsSource="{Binding ShownApps}">
+        <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" Text="{Binding EmptyText}">
+          <TextBlock.IsVisible>
+            <MultiBinding Converter="{x:Static BoolConverters.And}">
+              <Binding Path="AppListVisible" />
+              <Binding Path="!ShownApps.Count" />
+            </MultiBinding>
+          </TextBlock.IsVisible>
+        </TextBlock>
+        <ItemsControl ItemsSource="{Binding ShownApps}" IsVisible="{Binding AppListVisible}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
               <StackPanel Spacing="8" />
@@ -132,7 +163,8 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
-        <Button Name="AddButton" Classes="primary" Content="＋ Добавить" HorizontalAlignment="Left" Margin="0,2,0,0" />
+        <Button Name="AddButton" Classes="primary" Content="＋ Добавить" HorizontalAlignment="Left" Margin="0,2,0,0"
+                IsVisible="{Binding AppListVisible}" />
       </StackPanel>
     </ScrollViewer>
 
