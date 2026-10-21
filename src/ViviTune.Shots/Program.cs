@@ -77,9 +77,6 @@ appsPage.FindControl<TextBox>("SearchBox")!.Text = "pyth"; // нашлось т�
 Shot(NavPage.Apps, "apps-add-search-background.png");
 Shot(NavPage.Log, "log.png"); // уход со страницы закрывает панель
 Shot(NavPage.Settings, "settings.png");
-s.Apps.Clear();
-Shot(NavPage.Apps, "apps-empty.png");
-
 // VLESS: главная при подключении, вкладка «Сайты», настройки
 s.State = ConnState.Disconnected;
 s.Mode = ProxyMode.Vless;
@@ -93,6 +90,12 @@ s.DetailText = "";
 s.DirectTab = true;
 Shot(NavPage.Apps, "apps-sites.png");
 Shot(NavPage.Settings, "settings-vless.png");
+s.Mode = ProxyMode.Socks5; // назад к SOCKS5 для снимка пустого списка
+s.DirectTab = false;
+s.State = ConnState.Disconnected;
+s.Apps.Clear();
+Shot(NavPage.Apps, "apps-empty.png");
+
 window.Close();
 return 0;
 

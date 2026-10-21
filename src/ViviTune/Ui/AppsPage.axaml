@@ -73,7 +73,7 @@
       <Border Background="{StaticResource CardBrush}" CornerRadius="9" Padding="3" HorizontalAlignment="Left">
         <StackPanel Orientation="Horizontal" Spacing="3">
           <Button Classes="tab" Classes.on="{Binding !DirectTab}" Content="{Binding ProxyTabText}" Click="OnProxyTab" />
-          <Button Classes="tab warn" Classes.on="{Binding DirectTab}" Content="{Binding DirectTabText}" Click="OnDirectTab" />
+          <Button Classes="tab" Classes.warn="{Binding !IsVless}" Classes.on="{Binding DirectTab}" Content="{Binding DirectTabText}" Click="OnDirectTab" />
         </StackPanel>
       </Border>
     </StackPanel>
