@@ -21,6 +21,9 @@ public sealed class ViewState : INotifyPropertyChanged
     int port;
     int? directPort;
     bool directTab, proxyDown, bypassDown;
+    ProxyMode mode;
+    string vlessHost = "", vlessLink = "", vlessSummary = "", doh = "quad9";
+    bool vlessLinkError;
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event Action? ToggleRequested;
@@ -28,6 +31,16 @@ public sealed class ViewState : INotifyPropertyChanged
     public event Action<string>? RemoveAppRequested;
     public event Action<string, bool>? SetAppEnabledRequested;
     public event Action<string, int, int?>? SetProxyRequested;
+    public event Action<ProxyMode>? SetModeRequested;
+    public event Action<string, string>? SetVlessRequested; // ссылка, id DoH
+    public event Action<string, bool>? SetListEnabledRequested; // id списка
+
+    public ViewState()
+    {
+        ListGroups = Catalogs.Groups
+            .Select(g => new ListGroup(g, Catalogs.Lists.Where(l => l.Group == g).Select(l => new ListRow(l)).ToList()))
+            .ToList();
+    }
 
     public ConnState State
     {
@@ -55,7 +68,7 @@ public sealed class ViewState : INotifyPropertyChanged
 
     public string StatusText => state switch
     {
-        ConnState.Checking => "Проверяю прокси…",
+        ConnState.Checking => IsVless ? "Проверяю сервер…" : "Проверяю прокси…",
         ConnState.Restarting => "Перезапуск…",
         ConnState.Connected => "Подключено",
         _ => "Отключено"
@@ -69,11 +82,15 @@ public sealed class ViewState : INotifyPropertyChanged
 
     public string Ip { get => ip; set { if (Set(ref ip, value)) Notify(nameof(ProxyLabel)); } }
     public int Port { get => port; set { if (Set(ref port, value)) Notify(nameof(ProxyLabel)); } }
-    public string ProxyLabel => $"SOCKS5 · {ip}:{port}";
+    public string ProxyLabel => IsVless
+        ? (vlessHost.Length > 0 ? "VLESS · " + vlessHost : "VLESS")
+        : $"SOCKS5 · {ip}:{port}";
     public string? SettingsError { get => settingsError; set => Set(ref settingsError, value); }
 
     public double UpBps { get => upBps; private set { if (Set(ref upBps, value)) Notify(nameof(UpText)); } }
     public double DownBps { get => downBps; private set { if (Set(ref downBps, value)) Notify(nameof(DownText)); } }
+    public string UpLabel => IsVless ? "↑ Отдача через VPN" : "↑ Отдача через прокси";
+    public string DownLabel => IsVless ? "↓ Загрузка через VPN" : "↓ Загрузка через прокси";
     public string UpText => Format.Speed(upBps);
     public string DownText => Format.Speed(downBps);
     public string UpTotalText => "всего " + Format.Bytes(upTotal);
@@ -88,22 +105,71 @@ public sealed class ViewState : INotifyPropertyChanged
     public bool DirectTab
     {
         get => directTab;
-        set { if (Set(ref directTab, value)) Notify(nameof(ShownApps), nameof(EmptyText), nameof(DirectHintVisible), nameof(ExitDownHint)); }
+        set { if (Set(ref directTab, value)) Notify(nameof(ShownApps), nameof(EmptyText), nameof(DirectHintVisible), nameof(ExitDownHint), nameof(SitesTab), nameof(AppListVisible)); }
+    }
+
+    public ProxyMode Mode
+    {
+        get => mode;
+        set
+        {
+            if (!Set(ref mode, value)) return;
+            Notify(nameof(IsVless), nameof(ProxyLabel), nameof(ProxyTabText), nameof(DirectTabText), nameof(EmptyText), nameof(DirectHintVisible),
+                nameof(ExitDownHint), nameof(StatusText), nameof(UpLabel), nameof(DownLabel), nameof(SitesTab), nameof(AppListVisible));
+        }
+    }
+    public bool IsVless => mode == ProxyMode.Vless;
+    // VLESS: вкладка «Сайты» показывает списки ITDog вместо программ
+    public bool SitesTab => IsVless && directTab;
+    public bool AppListVisible => !SitesTab;
+
+    public string VlessHost { get => vlessHost; private set { if (Set(ref vlessHost, value)) Notify(nameof(ProxyLabel)); } }
+    public string VlessLink { get => vlessLink; private set => Set(ref vlessLink, value); }
+    public string VlessSummary { get => vlessSummary; private set => Set(ref vlessSummary, value); }
+    public bool VlessLinkError { get => vlessLinkError; private set => Set(ref vlessLinkError, value); }
+    public string Doh { get => doh; set => Set(ref doh, value); }
+    public IReadOnlyList<DohServer> DohServers => Catalogs.Doh;
+    public IReadOnlyList<ListGroup> ListGroups { get; }
+
+    // Ссылка из Settings: сервер и сводка под полем, либо текст ошибки (пустая ссылка — без ошибки)
+    public void SetVless(string link)
+    {
+        VlessLink = link;
+        var server = VlessServer.Parse(link, out var error);
+        if (server != null) { VlessHost = server.Host; VlessSummary = "Сервер: " + server.Summary; VlessLinkError = false; }
+        else if (string.IsNullOrWhiteSpace(link)) { VlessHost = ""; VlessSummary = ""; VlessLinkError = false; }
+        else { VlessHost = ""; VlessSummary = error ?? "Ссылка не разбирается"; VlessLinkError = true; }
+    }
+
+    // Строки списков по включённым id из Settings: Enabled, и Covered у тех, что уже входят в Russia inside
+    public void SyncLists(IReadOnlyList<string> enabled)
+    {
+        bool inside = enabled.Contains("russia_inside");
+        foreach (var r in ListGroups.SelectMany(g => g.Rows))
+        {
+            r.Enabled = enabled.Contains(r.Id);
+            r.Covered = r.InRussiaInside && inside;
+        }
+        Notify(nameof(DirectTabText));
     }
     public ObservableCollection<AppRow> ShownApps => directTab ? DirectApps : Apps;
-    public string ProxyTabText => $"Через прокси · {Apps.Count(a => a.Enabled)}";
-    public string DirectTabText => $"Мимо Podkop · {DirectApps.Count(a => a.Enabled)}";
-    public string EmptyText => directTab
+    public string ProxyTabText => IsVless ? $"Приложения · {Apps.Count(a => a.Enabled)}" : $"Через прокси · {Apps.Count(a => a.Enabled)}";
+    public string DirectTabText => IsVless
+        ? $"Сайты · {ListGroups.Sum(g => g.Rows.Count(r => r.Enabled))}"
+        : $"Мимо Podkop · {DirectApps.Count(a => a.Enabled)}";
+    public string EmptyText => IsVless ? "Добавьте приложение, трафик которого пойдёт через VPN"
+        : directTab
         ? "Добавьте приложение, трафик которого пойдёт мимо Podkop"
         : "Добавьте приложение, трафик которого пойдёт через прокси";
     public int? DirectPort { get => directPort; set { if (Set(ref directPort, value)) Notify(nameof(DirectHintVisible)); } }
     // Вкладка «Мимо Podkop» без порта: подсказать, где его задать
-    public bool DirectHintVisible => directTab && directPort == null;
+    public bool DirectHintVisible => !IsVless && directTab && directPort == null;
     // Выход списка не отвечает при подключении: программы идут обычным путём (ставит App по Session.Live)
     public bool ProxyDown { get => proxyDown; set { if (Set(ref proxyDown, value)) Notify(nameof(ExitDownHint)); } }
     public bool BypassDown { get => bypassDown; set { if (Set(ref bypassDown, value)) Notify(nameof(ExitDownHint)); } }
     public string? ExitDownHint =>
-        directTab && bypassDown ? "Порт «Мимо Podkop» не отвечает: программы из этой вкладки сейчас идут обычным путём."
+        IsVless ? null
+        : directTab && bypassDown ? "Порт «Мимо Podkop» не отвечает: программы из этой вкладки сейчас идут обычным путём."
         : !directTab && proxyDown ? "Прокси не отвечает: программы из этой вкладки сейчас идут обычным путём."
         : null;
     public ObservableCollection<string> LogLines { get; } = new();
@@ -193,6 +259,15 @@ public sealed class ViewState : INotifyPropertyChanged
         return time + u + p + d;
     }
 
+    // Строка под статусом в VLESS: «00:12:03 · 2 приложения · 3 списка · DNS Quad9»; нулевые части (кроме DNS) не пишутся.
+    public static string DetailVless(TimeSpan up, int apps, int lists, string dohName)
+    {
+        var s = Format.Uptime(up < TimeSpan.Zero ? TimeSpan.Zero : up);
+        if (apps > 0) s += " · " + Format.Plural(apps, "приложение", "приложения", "приложений");
+        if (lists > 0) s += " · " + Format.Plural(lists, "список", "списка", "списков");
+        return s + " · DNS " + dohName;
+    }
+
     public void RequestToggle() => ToggleRequested?.Invoke();
     public void RequestAddApp(string path) => AddAppRequested?.Invoke(path, directTab);
     public void RequestRemoveApp(string path) => RemoveAppRequested?.Invoke(path);
@@ -203,6 +278,20 @@ public sealed class ViewState : INotifyPropertyChanged
     {
         if (ip == Ip && port == Port && directPort == DirectPort) return;
         SetProxyRequested?.Invoke(ip, port, directPort);
+    }
+
+    public void RequestSetMode(ProxyMode m) => SetModeRequested?.Invoke(m);
+    // Без изменений события нет (как у RequestSetProxy): заполнение полей при старте не должно переписывать settings.json
+    public void RequestSetVless(string link, string dohId)
+    {
+        if (link == VlessLink && dohId == Doh) return;
+        SetVlessRequested?.Invoke(link, dohId);
+    }
+    public void RequestSetListEnabled(string id, bool enabled)
+    {
+        var row = ListGroups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id);
+        if (row == null || row.Covered) return; // уже входит в Russia inside: не переключается
+        SetListEnabledRequested?.Invoke(id, enabled);
     }
 
     static void Push<T>(ObservableCollection<T> list, T value, int max)
@@ -273,5 +362,39 @@ public sealed class AppRow : INotifyPropertyChanged
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
         return true;
+    }
+}
+
+public sealed record ListGroup(string Title, IReadOnlyList<ListRow> Rows);
+
+public sealed class ListRow : INotifyPropertyChanged
+{
+    readonly ItdogList list;
+    bool enabled, covered;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public ListRow(ItdogList list) => this.list = list;
+
+    public string Id => list.Id;
+    public string Name => list.Name;
+    public bool InRussiaInside => list.InRussiaInside;
+    public string Note => covered ? "уже входит в Russia inside" : list.Note;
+    public bool Enabled
+    {
+        get => enabled;
+        set { if (enabled == value) return; enabled = value; Raise(nameof(Enabled), nameof(Shown)); }
+    }
+    public bool Covered
+    {
+        get => covered;
+        set { if (covered == value) return; covered = value; Raise(nameof(Covered), nameof(Shown), nameof(CanToggle), nameof(Note)); }
+    }
+    public bool Shown => enabled || covered;
+    public bool CanToggle => !covered;
+
+    void Raise(params string[] names)
+    {
+        foreach (var n in names) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
     }
 }

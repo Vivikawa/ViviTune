@@ -48,11 +48,16 @@ namespace ViviTune.Ui
             {
                 Ip = settings.Ip,
                 Port = settings.Port,
+                Mode = settings.Mode,
+                Doh = settings.Doh,
                 DirectPort = settings.DirectPort,
                 SettingsError = Settings.ValidateProxy(settings.Ip, settings.Port) ?? Settings.ValidateDirectPort(settings.DirectPort, settings.Port),
                 ListRunning = exclude => ProcessCatalog.Running(exclude).Select(a => (a.Path, a.Name, a.Background)),
                 IconPng = ProcessCatalog.IconPng
             };
+
+            state.SetVless(settings.VlessLink);
+            state.SyncLists(settings.Lists);
 
             // Новые строки (с именем файла и плашкой) получают описание программы и иконку, не в UI-потоке.
             // Файла нет — так и остаётся (имя из имени файла, плашка с буквой).
@@ -76,6 +81,14 @@ namespace ViviTune.Ui
             // Новый список → Save → строки → Session.AppsChanged. Вызовы AppsChanged идут по очереди:
             // каждый читает текущий Settings.Apps, так что последний вызов видит последнее состояние.
             var appsChain = Task.CompletedTask;
+            void QueueAppsChanged()
+            {
+                appsChain = appsChain.ContinueWith(_ =>
+                {
+                    try { session.AppsChanged(); } // может отключать и ждать перезапуска: не в UI-потоке
+                    catch (Exception e) { Dispatcher.UIThread.Post(() => state.AddLog("Ошибка: " + e.Message)); }
+                }, TaskScheduler.Default);
+            }
             void ChangeApps(Func<List<AppEntry>, List<AppEntry>, bool> change)
             {
                 var apps = AppListOps.Copy(settings.Apps);
@@ -86,12 +99,19 @@ namespace ViviTune.Ui
                 try { settings.Save(settingsPath); }
                 catch (Exception) { } // папка недоступна для записи: работаем без сохранения
                 SyncRows(apps, direct);
-                appsChain = appsChain.ContinueWith(_ =>
-                {
-                    try { session.AppsChanged(); } // может отключать и ждать перезапуска: не в UI-потоке
-                    catch (Exception e) { Dispatcher.UIThread.Post(() => state.AddLog("Ошибка: " + e.Message)); }
-                }, TaskScheduler.Default);
+                QueueAppsChanged();
             }
+            // Settings.Lists тоже заменяется целиком (порядок каталога), не меняется на месте.
+            state.SetListEnabledRequested += (id, on) =>
+            {
+                var ids = settings.Lists.ToHashSet();
+                if (!(on ? ids.Add(id) : ids.Remove(id))) return;
+                settings.Lists = Catalogs.Lists.Where(l => ids.Contains(l.Id)).Select(l => l.Id).ToList();
+                try { settings.Save(settingsPath); }
+                catch (Exception) { } // папка недоступна для записи: работаем без сохранения
+                state.SyncLists(settings.Lists);
+                QueueAppsChanged();
+            };
             state.AddAppRequested += (path, toDirect) => ChangeApps((p, d) => toDirect ? AppListOps.Move(d, p, path) : AppListOps.Move(p, d, path));
             // Путь может быть в любом из списков: без короткого замыкания (| вместо ||), чтобы затронуть оба
             state.RemoveAppRequested += path => ChangeApps((p, d) => AppListOps.Remove(p, path) | AppListOps.Remove(d, path));
@@ -108,10 +128,11 @@ namespace ViviTune.Ui
             {
                 var since = session.ConnectedSince;
                 var live = session.Live;
-                state.DetailText = state.State == ConnState.Connected && since != null
-                    ? ViewState.Detail(DateTime.Now - since.Value, session.UdpOk,
-                        live.Proxy ? state.Apps.Count(a => a.Enabled) : 0, live.Bypass ? state.DirectApps.Count(a => a.Enabled) : 0)
-                    : "";
+                state.DetailText = state.State != ConnState.Connected || since == null ? ""
+                    : state.IsVless
+                    ? ViewState.DetailVless(DateTime.Now - since.Value, state.Apps.Count(a => a.Enabled), settings.Lists.Count, Catalogs.DohById(settings.Doh).Name)
+                    : ViewState.Detail(DateTime.Now - since.Value, session.UdpOk,
+                        live.Proxy ? state.Apps.Count(a => a.Enabled) : 0, live.Bypass ? state.DirectApps.Count(a => a.Enabled) : 0);
             }
             detailTimer.Tick += (_, _) => UpdateDetail();
 
@@ -121,8 +142,8 @@ namespace ViviTune.Ui
                 state.ErrorText = session.Error;
                 state.WarningText = session.Warnings.Count > 0 ? string.Join("\n", session.Warnings) : null;
                 bool live = state.State is ConnState.Connected or ConnState.Restarting;
-                state.ProxyDown = live && state.Apps.Any(a => a.Enabled) && !session.Live.Proxy;
-                state.BypassDown = live && state.DirectPort != null && state.DirectApps.Any(a => a.Enabled) && !session.Live.Bypass;
+                state.ProxyDown = !state.IsVless && live && state.Apps.Any(a => a.Enabled) && !session.Live.Proxy;
+                state.BypassDown = !state.IsVless && live && state.DirectPort != null && state.DirectApps.Any(a => a.Enabled) && !session.Live.Bypass;
                 UpdateDetail();
                 detailTimer.IsEnabled = state.State == ConnState.Connected;
                 toggleItem.Header = state.State == ConnState.Disconnected ? "Подключить" : "Отключить";
@@ -143,6 +164,24 @@ namespace ViviTune.Ui
                     else await Task.Run(session.Disconnect); // может ждать перезапуска до ~3 с: не в UI-потоке
                 }
                 catch (Exception e) { state.AddLog("Ошибка: " + e.Message); }
+            };
+            state.SetModeRequested += mode =>
+            {
+                if (session.State != ConnState.Disconnected) return; // режим меняется только без подключения
+                settings.Mode = mode;
+                state.Mode = mode;
+                try { settings.Save(settingsPath); }
+                catch (Exception) { } // папка недоступна для записи: работаем без сохранения
+            };
+            state.SetVlessRequested += (link, dohId) =>
+            {
+                if (session.State != ConnState.Disconnected) return;
+                settings.VlessLink = link;
+                settings.Doh = Catalogs.DohById(dohId).Id;
+                state.SetVless(link);
+                state.Doh = settings.Doh;
+                try { settings.Save(settingsPath); }
+                catch (Exception) { }
             };
             state.SetProxyRequested += (ip, port, direct) =>
             {

@@ -32,6 +32,7 @@ static class Program
         VlessConfigTests();
         ListStoreTests();
         VlessProbeTests();
+        ViewStateVlessTests();
         return failures == 0 ? 0 : 1;
     }
 
@@ -470,6 +471,80 @@ static class Program
         cl.Apps.Clear();
         cl.DirectPort = 6;
         Check(orig.DirectApps[0].Enabled && orig.Apps.Count == 1 && orig.DirectPort == 5, "Clone: глубокая копия");
+    }
+
+    static void ViewStateVlessTests()
+    {
+        var v = new ViewState();
+        v.SyncApps(A(@"C:\chrome.exe"), new List<AppEntry>());
+        Check(v.ProxyTabText == "Через прокси · 1" && v.DirectTabText == "Мимо Podkop · 0" && v.UpLabel == "↑ Отдача через прокси" && v.DownLabel == "↓ Загрузка через прокси",
+            "ViewState: SOCKS5 — вкладки и подписи как раньше");
+        var changed = new List<string>();
+        v.PropertyChanged += (_, e) => changed.Add(e.PropertyName ?? "");
+        v.Mode = ProxyMode.Vless;
+        Check(v.IsVless && v.ProxyTabText == "Приложения · 1" && v.DirectTabText == "Сайты · 0" && v.UpLabel == "↑ Отдача через VPN" && v.DownLabel == "↓ Загрузка через VPN"
+            && v.ProxyLabel == "VLESS" && v.EmptyText == "Добавьте приложение, трафик которого пойдёт через VPN",
+            "ViewState: Vless — вкладки, подписи, ProxyLabel, EmptyText");
+        foreach (var n in new[] { "IsVless", "ProxyTabText", "DirectTabText", "ProxyLabel", "EmptyText", "UpLabel", "DownLabel", "StatusText", "SitesTab", "AppListVisible", "DirectHintVisible", "ExitDownHint" })
+            Check(changed.Contains(n), "ViewState: смена режима уведомляет " + n);
+        v.State = ConnState.Checking;
+        Check(v.StatusText == "Проверяю сервер…", "ViewState: Vless Checking -> «Проверяю сервер…»");
+        v.State = ConnState.Disconnected;
+        v.DirectTab = true;
+        v.ProxyDown = true; v.BypassDown = true;
+        Check(v.SitesTab && !v.AppListVisible && !v.DirectHintVisible && v.ExitDownHint == null, "ViewState: Vless, вкладка «Сайты» — без подсказок");
+        changed.Clear();
+        v.DirectTab = false;
+        Check(changed.Contains("SitesTab") && changed.Contains("AppListVisible") && !v.SitesTab && v.AppListVisible, "ViewState: DirectTab уведомляет SitesTab");
+        v.Mode = ProxyMode.Socks5;
+        Check(v.ProxyLabel == $"SOCKS5 · {v.Ip}:{v.Port}" && v.StatusText == "Отключено", "ViewState: возврат в SOCKS5");
+
+        v.Mode = ProxyMode.Vless;
+        v.SetVless("vless://11111111-1111-1111-1111-111111111111@example.com:443?security=tls&type=tcp#n");
+        Check(v.VlessHost == "example.com" && v.VlessSummary.StartsWith("Сервер: ") && !v.VlessLinkError && v.ProxyLabel == "VLESS · example.com", "ViewState.SetVless: верная ссылка");
+        v.SetVless("");
+        Check(v.VlessHost == "" && v.VlessSummary == "" && !v.VlessLinkError, "ViewState.SetVless: пустая ссылка");
+        v.SetVless("http://x");
+        Check(v.VlessHost == "" && v.VlessSummary == "Ссылка должна начинаться с vless://" && v.VlessLinkError, "ViewState.SetVless: битая ссылка");
+
+        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 2, 3, "Quad9") == "00:12:03 · 2 приложения · 3 списка · DNS Quad9", "DetailVless: всё");
+        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 1, 0, "Quad9") == "00:12:03 · 1 приложение · DNS Quad9", "DetailVless: без списков");
+        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 0, 5, "Quad9") == "00:12:03 · 5 списков · DNS Quad9", "DetailVless: без приложений");
+
+        var forms = new (int, string)[] { (1, "1 приложение"), (2, "2 приложения"), (5, "5 приложений"), (11, "11 приложений"), (12, "12 приложений"), (21, "21 приложение"), (22, "22 приложения"), (25, "25 приложений"), (111, "111 приложений"), (112, "112 приложений") };
+        Check(forms.All(f => Format.Plural(f.Item1, "приложение", "приложения", "приложений") == f.Item2), "Format.Plural: русские формы");
+
+        var l = new ViewState();
+        Check(l.ListGroups.Count == Catalogs.Groups.Count && l.ListGroups.Sum(g => g.Rows.Count) == Catalogs.Lists.Count, "ViewState: ListGroups из каталога");
+        var rows = l.ListGroups.SelectMany(g => g.Rows).ToDictionary(r => r.Id);
+        var rowChanged = new List<string>();
+        rows["youtube"].PropertyChanged += (_, e) => rowChanged.Add(e.PropertyName ?? "");
+        l.SyncLists(new[] { "russia_inside" });
+        var yt = rows["youtube"];
+        Check(yt.Covered && yt.Shown && !yt.CanToggle && yt.Note == "уже входит в Russia inside" && !rows["discord"].Covered && rows["russia_inside"].Enabled && !rows["discord"].Shown,
+            "ViewState.SyncLists: Covered строка");
+        Check(rowChanged.Contains("Covered") && rowChanged.Contains("Shown") && rowChanged.Contains("CanToggle") && rowChanged.Contains("Note"), "ViewState.SyncLists: строка уведомляет");
+        l.Mode = ProxyMode.Vless;
+        Check(l.DirectTabText == "Сайты · 1", "ViewState.SyncLists: счётчик на вкладке");
+        int lev = 0;
+        l.SetListEnabledRequested += (_, _) => lev++;
+        l.RequestSetListEnabled("youtube", false);
+        Check(lev == 0, "ViewState: Covered строка — события нет");
+        l.RequestSetListEnabled("discord", true);
+        Check(lev == 1, "ViewState: обычная строка — событие");
+
+        var r = new ViewState { Doh = "quad9" };
+        r.SetVless("vless://11111111-1111-1111-1111-111111111111@example.com:443?security=tls&type=tcp#n");
+        int ve = 0; string? gl = null, gd = null;
+        r.SetVlessRequested += (a, b) => { ve++; gl = a; gd = b; };
+        r.RequestSetVless(r.VlessLink, "quad9");
+        Check(ve == 0, "ViewState: RequestSetVless без изменений — события нет");
+        r.RequestSetVless(r.VlessLink, "dnssb");
+        Check(ve == 1 && gd == "dnssb", "ViewState: RequestSetVless с изменением");
+        int me = 0;
+        r.SetModeRequested += _ => me++;
+        r.RequestSetMode(ProxyMode.Vless);
+        Check(me == 1, "ViewState: RequestSetMode");
     }
 
     static void ViewStateTests()
