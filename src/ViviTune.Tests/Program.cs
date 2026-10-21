@@ -29,7 +29,124 @@ static class Program
         VlessLinkTests();
         SettingsV4Tests();
         CatalogsTests();
+        VlessConfigTests();
         return failures == 0 ? 0 : 1;
+    }
+
+    static void VlessConfigTests()
+    {
+        // Эталон SOCKS5 из 2.1: режим SOCKS5 не меняется ни на байт
+        const string Golden = @"{""log"":{""level"":""warn"",""timestamp"":true},""experimental"":{""clash_api"":{""external_controller"":""127.0.0.1:9090"",""secret"":""s""}},""dns"":{""servers"":[{""type"":""local"",""tag"":""local""},{""type"":""tcp"",""tag"":""proxy-dns"",""server"":""1.1.1.1"",""detour"":""proxy""}],""rules"":[{""process_name"":[""chrome.exe"",""Игра.exe""],""server"":""proxy-dns""}]},""inbounds"":[{""type"":""tun"",""tag"":""tun-in"",""address"":[""172.19.0.1/30"",""fdfe:dcba:9876::1/126""],""auto_route"":true,""strict_route"":false}],""outbounds"":[{""type"":""socks"",""tag"":""proxy"",""server"":""192.168.1.1"",""server_port"":1818,""version"":""5""},{""type"":""direct"",""tag"":""direct""},{""type"":""socks"",""tag"":""bypass"",""server"":""192.168.1.1"",""server_port"":1819,""version"":""5""}],""route"":{""rules"":[{""action"":""sniff""},{""protocol"":""dns"",""action"":""hijack-dns""},{""ip_cidr"":[""192.168.1.1/32""],""outbound"":""direct""},{""process_name"":[""chrome.exe"",""Игра.exe""],""outbound"":""proxy""},{""process_name"":[""qbittorrent.exe""],""outbound"":""bypass""}],""final"":""direct"",""auto_detect_interface"":true,""default_domain_resolver"":""local""}}";
+        var gs = new Settings { Ip = "192.168.1.1", Port = 1818, DirectPort = 1819, Apps = A(@"C:\a b\chrome.exe", @"C:\Игра\Игра.exe"), DirectApps = A(@"C:\q\qbittorrent.exe") };
+        var gj = ConfigBuilder.Build(gs, 9090, "s");
+        Check(gj == Golden, "SOCKS5: конфиг байт в байт как в 2.1");
+        var gc = JsonNode.Parse(gj)!.AsObject();
+        Check(Obj(Arr(gc["inbounds"])[0])["strict_route"]!.GetValue<bool>() == false && !gj.Contains("vless") && !gj.Contains("rule_set"), "SOCKS5: strict_route false, нет vless и rule_set");
+
+        const string U = "3f1c0a52-0000-4000-8000-000000000001";
+        var reality = $"vless://{U}@nl.example.com:443?security=reality&sni=www.microsoft.com&pbk=PUBKEY&sid=ab12&type=tcp&flow=xtls-rprx-vision";
+        var wsLink = $"vless://{U}@1.2.3.4:8443?security=tls&type=ws&host=cdn.example.com&path=%2Fws%3Fed%3D2048&fp=firefox&alpn=h2,http/1.1";
+        var srv = IPAddress.Parse("203.0.113.5");
+        var files = new Dictionary<string, string> { ["youtube"] = @"C:\l\youtube.srs", ["russia_inside"] = @"C:\l\russia_inside.srs" };
+        JsonObject V(string link, string doh, Dictionary<string, string> f, params string[] apps)
+        {
+            var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Doh = doh, Apps = A(apps), Lists = f.Keys.ToList() };
+            return JsonNode.Parse(ConfigBuilder.BuildVless(st, 9090, "t", srv, f))!.AsObject();
+        }
+
+        var c = V(reality, "quad9", files, @"C:\a\chrome.exe");
+        var ob = Obj(Arr(c["outbounds"])[0]);
+        Check(Str(ob["type"]) == "vless" && Str(ob["tag"]) == "proxy" && Str(ob["server"]) == "203.0.113.5" && (int)ob["server_port"]! == 443
+            && Str(ob["uuid"]) == U && Str(ob["flow"]) == "xtls-rprx-vision" && Str(ob["packet_encoding"]) == "xudp", "VLESS: outbound vless, server, uuid, flow, xudp");
+        var tls = Obj(ob["tls"]);
+        Check(Str(tls["server_name"]) == "www.microsoft.com" && Str(Obj(tls["utls"])["fingerprint"]) == "chrome"
+            && Str(Obj(tls["reality"])["public_key"]) == "PUBKEY" && Str(Obj(tls["reality"])["short_id"]) == "ab12" && !ob.ContainsKey("transport"), "VLESS: reality tls, utls, без transport");
+        Check(Str(Obj(Arr(c["outbounds"])[1])["type"]) == "direct", "VLESS: outbounds[1] direct");
+        var rs = Arr(Obj(c["route"])["rule_set"]);
+        Check(rs.Count == 2 && Str(Obj(rs[0])["tag"]) == "russia_inside" && Str(Obj(rs[1])["tag"]) == "youtube"
+            && Str(Obj(rs[0])["type"]) == "local" && Str(Obj(rs[0])["format"]) == "binary" && Str(Obj(rs[1])["path"]) == @"C:\l\youtube.srs", "VLESS: route.rule_set в порядке каталога");
+        var rules = Arr(Obj(c["route"])["rules"]);
+        int iSniff = IndexOfRule(rules, "action"), iDns = IndexOfRule(rules, "protocol"), iIp = IndexOfRule(rules, "ip_cidr"), iPn = IndexOfRule(rules, "process_name"), iRs = IndexOfRule(rules, "rule_set");
+        Check(iSniff == 0 && iDns == 1 && iIp == 2 && iPn == 3 && iRs == 4, "VLESS: порядок правил sniff, hijack-dns, ip_cidr, process_name, rule_set");
+        Check(Str(Arr(Obj(rules[iIp])["ip_cidr"])[0]) == "203.0.113.5/32" && Str(Obj(rules[iIp])["outbound"]) == "direct"
+            && Str(Obj(rules[iPn])["outbound"]) == "proxy" && Str(Arr(Obj(rules[iRs])["rule_set"])[0]) == "russia_inside" && Str(Obj(rules[iRs])["outbound"]) == "proxy", "VLESS: содержимое правил");
+        var rt = Obj(c["route"]);
+        Check(Str(rt["final"]) == "direct" && rt["auto_detect_interface"]!.GetValue<bool>() && Str(rt["default_domain_resolver"]) == "doh", "VLESS: final direct, default_domain_resolver doh");
+        Check(Obj(Arr(c["inbounds"])[0])["strict_route"]!.GetValue<bool>(), "VLESS: strict_route true");
+
+        var w = V(wsLink, "quad9", files, @"C:\a\chrome.exe");
+        var wo = Obj(Arr(w["outbounds"])[0]);
+        var tr = Obj(wo["transport"]);
+        Check(Str(tr["type"]) == "ws" && Str(tr["path"]) == "/ws?ed=2048" && Str(Obj(tr["headers"])["Host"]) == "cdn.example.com", "VLESS: ws transport");
+        var wt = Obj(wo["tls"]);
+        Check(Arr(wt["alpn"]).Select(x => Str(x)).SequenceEqual(new[] { "h2", "http/1.1" }) && !wt.ContainsKey("reality") && !wt.ContainsKey("insecure") && !wo.ContainsKey("flow"), "VLESS: tls+ws, alpn, нет reality");
+
+        var plain = V($"vless://{U}@h.example.com:80", "quad9", files, @"C:\a\chrome.exe");
+        Check(!Obj(Arr(plain["outbounds"])[0]).ContainsKey("tls"), "VLESS: без security нет tls");
+
+        var dq = Arr(Obj(c["dns"])["servers"]);
+        var d0 = Obj(dq[0]);
+        Check(dq.Count == 1 && Str(d0["type"]) == "https" && Str(d0["tag"]) == "doh" && Str(d0["server"]) == "9.9.9.9" && Str(d0["path"]) == "/dns-query"
+            && Str(d0["detour"]) == "proxy" && !d0.ContainsKey("server_port") && !d0.ContainsKey("domain_resolver") && Str(Obj(c["dns"])["final"]) == "doh"
+            && !Obj(c["dns"]).ToJsonString().Contains("\"type\":\"local\""), "VLESS DNS quad9: один сервер doh через proxy, final doh, нет local");
+        var cd = V(reality, "controld", files, @"C:\a\chrome.exe");
+        var cs = Arr(Obj(cd["dns"])["servers"]).Select(Obj).ToList();
+        var cdoh = cs.First(x => Str(x["tag"]) == "doh");
+        var cbs = cs.First(x => Str(x["tag"]) == "bootstrap");
+        Check(Str(cdoh["server"]) == "freedns.controld.com" && Str(cdoh["path"]) == "/p0" && Str(cdoh["domain_resolver"]) == "bootstrap" && Str(cdoh["detour"]) == "proxy"
+            && Str(cbs["server"]) == "9.9.9.9" && Str(cbs["path"]) == "/dns-query" && Str(cbs["detour"]) == "proxy" && Str(cbs["type"]) == "https", "VLESS DNS controld: bootstrap");
+
+        var onlyLists = Arr(Obj(V(reality, "quad9", files)["route"])["rules"]);
+        Check(IndexOfRule(onlyLists, "process_name") < 0 && IndexOfRule(onlyLists, "rule_set") >= 0, "VLESS: только списки, нет process_name");
+        var onlyApp = V(reality, "quad9", new Dictionary<string, string>(), @"C:\a\chrome.exe");
+        Check(IndexOfRule(Arr(Obj(onlyApp["route"])["rules"]), "rule_set") < 0 && !Obj(onlyApp["route"]).ContainsKey("rule_set"), "VLESS: только программа, нет rule_set");
+
+        bool threw = false;
+        try { V(reality, "quad9", new Dictionary<string, string>()); } catch (InvalidOperationException) { threw = true; }
+        Check(threw, "VLESS: нет программ и списков -> исключение");
+
+        SingBoxCheck(reality, wsLink, srv);
+    }
+
+    // Реальный sing-box check: конфиги из BuildVless принимаются 1.12.12
+    static void SingBoxCheck(string reality, string wsLink, IPAddress srv)
+    {
+        var exe = Path.Combine(AppContext.BaseDirectory, "sing-box.exe");
+        if (!File.Exists(exe))
+            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+            {
+                var cand = Path.Combine(dir.FullName, "src", "ViviTune", "third_party", "sing-box.exe");
+                if (File.Exists(cand)) { exe = cand; break; }
+            }
+        if (!File.Exists(exe)) { Check(false, "sing-box.exe рядом с тестами"); return; }
+
+        var tmp = Directory.CreateTempSubdirectory("vivitune-sb").FullName;
+        try
+        {
+            int Run(params string[] args)
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo(exe) { WorkingDirectory = tmp, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+                foreach (var a in args) psi.ArgumentList.Add(a);
+                using var pr = System.Diagnostics.Process.Start(psi)!;
+                var o = pr.StandardOutput.ReadToEndAsync(); var e = pr.StandardError.ReadToEndAsync();
+                pr.WaitForExit();
+                if (pr.ExitCode != 0) Console.WriteLine(o.Result + e.Result);
+                return pr.ExitCode;
+            }
+            var src = Path.Combine(tmp, "rs.json");
+            var srs = Path.Combine(tmp, "rs.srs");
+            File.WriteAllText(src, "{\"version\":3,\"rules\":[{\"domain_suffix\":[\"example.com\"]}]}");
+            Check(Run("rule-set", "compile", "--output", srs, src) == 0 && File.Exists(srs), "sing-box rule-set compile");
+            var f = new Dictionary<string, string> { ["russia_inside"] = srs };
+            foreach (var (name, link, doh) in new[] { ("reality", reality.Replace("PUBKEY", "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0"), "quad9"), ("ws+controld", wsLink, "controld") })
+            {
+                var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Doh = doh, Apps = A(@"C:\a\chrome.exe") };
+                var cfg = Path.Combine(tmp, name + ".json");
+                File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", srv, f));
+                Check(Run("check", "-c", cfg) == 0, "sing-box check: " + name);
+            }
+        }
+        finally { try { Directory.Delete(tmp, true); } catch { } }
     }
 
     static void SettingsV4Tests()
