@@ -1274,22 +1274,23 @@ static class Program
             }
             {
                 var fb = new FakeSingBox();
-                var s = Two();
+                var s = Both(); // перезапуск вызываем сменой Needs: единственная программа «Мимо Podkop»
                 var cfg = NewCfg();
                 using var ss = new Session(s, fb, cfg, Up, Delay);
                 ss.ConnectAsync().Wait(2000);
-                s.Apps[1].Enabled = false;
+                s.DirectApps[0].Enabled = false;
                 ss.AppsChanged();
                 bool restarting = ss.State == ConnState.Restarting;
-                s.Apps[1].Enabled = true;
+                s.DirectApps[0].Enabled = true;
                 ss.AppsChanged();
                 s.Apps.Add(new AppEntry { Path = @"C:\c\Discord.exe" });
+                s.DirectApps[0].Enabled = false;
                 ss.AppsChanged();
                 Thread.Sleep(300);
                 var apps = CfgApps(cfg);
                 Check(restarting && fb.Starts == 2 && fb.Stops == 1 && ss.State == ConnState.Connected,
                     "Session: три быстрых изменения -> один перезапуск");
-                Check(apps.SequenceEqual(new[] { "chrome.exe", "Game.exe", "Discord.exe" }), "Session: конфиг перезапуска по последнему состоянию");
+                Check(apps.SequenceEqual(new[] { "chrome.exe", "Discord.exe" }), "Session: конфиг перезапуска по последнему состоянию");
             }
             {
                 var fb = new FakeSingBox();
@@ -1307,6 +1308,8 @@ static class Program
             {
                 var fb = new FakeSingBox();
                 var s = Two();
+                s.DirectPort = 1090;
+                s.DirectApps = A(@"C:\q\qbittorrent.exe"); // перезапуск вызываем сменой Needs: её единственная программа
                 s.Apps.Add(new AppEntry { Path = @"C:\c\Discord.exe", Enabled = false });
                 s.Apps.Add(new AppEntry { Path = @"D:\old\CHROME.EXE", Enabled = false });
                 var cfg = NewCfg();
@@ -1322,6 +1325,7 @@ static class Program
                 Check(a && b && ss.State == ConnState.Connected && fb.Starts == 1 && fb.Stops == 0,
                     "Session: правила те же (включён дубль, убран выключенный) -> без перезапуска");
                 s.Apps[1].Enabled = false;
+                s.DirectApps[0].Enabled = false;
                 ss.AppsChanged();
                 Thread.Sleep(300);
                 Check(fb.Starts == 2 && ss.State == ConnState.Connected && CfgApps(cfg).SequenceEqual(new[] { "chrome.exe" }),
@@ -1329,13 +1333,13 @@ static class Program
             }
             {
                 var fb = new FakeSingBox();
-                var s = Two();
+                var s = Both();
                 using var ss = new Session(s, fb, NewCfg(), Up, Delay);
                 ss.ConnectAsync().Wait(2000);
-                s.Apps[1].Enabled = false;
+                s.DirectApps[0].Enabled = false;
                 ss.AppsChanged();
                 bool restarting = ss.State == ConnState.Restarting;
-                s.Apps[1].Enabled = true; // вернули как было, пока ждали перезапуска
+                s.DirectApps[0].Enabled = true; // вернули как было, пока ждали перезапуска
                 ss.AppsChanged();
                 Thread.Sleep(300);
                 Check(restarting && ss.State == ConnState.Connected && fb.Starts == 1 && fb.Stops == 0 && ss.Error == null,
@@ -1343,13 +1347,13 @@ static class Program
             }
             {
                 var fb = new FakeSingBox();
-                var s = Two();
+                var s = Both();
                 using var ss = new Session(s, fb, NewCfg(), Up, Delay);
                 ss.ConnectAsync().Wait(2000);
-                s.Apps[0].Enabled = false;
+                s.DirectApps[0].Enabled = false;
                 ss.AppsChanged();
                 bool stillUp = ss.State == ConnState.Restarting;
-                s.Apps[1].Enabled = false;
+                s.Apps[0].Enabled = false;
                 ss.AppsChanged();
                 bool off = ss.State == ConnState.Disconnected;
                 Thread.Sleep(150);
@@ -1358,10 +1362,10 @@ static class Program
             }
             {
                 var fb = new FakeSingBox { ExitOnStop = true };
-                var s = Two();
+                var s = Both();
                 using var ss = new Session(s, fb, NewCfg(), Up, Delay);
                 ss.ConnectAsync().Wait(2000);
-                s.Apps[0].Enabled = false;
+                s.DirectApps[0].Enabled = false;
                 ss.AppsChanged();
                 Thread.Sleep(300);
                 bool afterRestart = ss.State == ConnState.Connected && ss.Error == null && fb.Starts == 2;
@@ -1371,12 +1375,12 @@ static class Program
             }
             {
                 var fb = new FakeSingBox();
-                var s = Two();
+                var s = Both();
                 using var ss = new Session(s, fb, NewCfg(), Up, Delay);
                 ss.ConnectAsync().Wait(2000);
                 fb.LateExited(); // событие от прежнего процесса: текущий жив
                 bool a = ss.State == ConnState.Connected && ss.Error == null;
-                s.Apps[0].Enabled = false;
+                s.DirectApps[0].Enabled = false;
                 ss.AppsChanged();
                 Thread.Sleep(300);
                 fb.LateExited();
@@ -1457,7 +1461,7 @@ static class Program
                 Thread.Sleep(300);
                 bool warned = ss.Warnings.Any(w => w.StartsWith("Порт «Мимо Podkop» недоступен"));
                 Volatile.Write(ref bypassUp, true);
-                s.Apps = A(@"C:\a\chrome.exe", @"C:\b\Game.exe");
+                s.Apps = new List<AppEntry>(); // Needs снова меняется (остался только «Мимо Podkop»): перезапуск
                 ss.AppsChanged();
                 Thread.Sleep(300);
                 var rules = Arr(Obj(JsonNode.Parse(File.ReadAllText(cfg))!["route"])["rules"]);
@@ -1484,20 +1488,20 @@ static class Program
             }
             {
                 var fb = new FakeSingBox();
-                var s = Two();
+                var s = Both();
                 int calls = 0;
                 using var started = new ManualResetEventSlim();
                 using var release = new ManualResetEventSlim();
                 using var ss = new Session(s, fb, NewCfg(), (ip, port) =>
                 {
                     int c = Interlocked.Increment(ref calls);
-                    if (c != 2) return Up(ip, port); // 1 — первое подключение, 3+ — новое подключение
-                    started.Set(); // 2 — проверка перезапуска: ждёт и сообщает «не отвечает»
+                    if (c != 3) return Up(ip, port); // 1–2 — первое подключение (прокси и «Мимо Podkop»), 4+ — новое подключение
+                    started.Set(); // 3 — проверка перезапуска: ждёт и сообщает «не отвечает»
                     release.Wait(2000);
                     return DownProbe(ip, port);
                 }, Delay);
                 ss.ConnectAsync().Wait(2000);
-                s.Apps[1].Enabled = false;
+                s.DirectApps[0].Enabled = false;
                 ss.AppsChanged(); // перезапуск повис в проверке
                 started.Wait(2000);
                 ss.Disconnect();
@@ -1509,12 +1513,12 @@ static class Program
             }
             {
                 var fb = new FakeSingBox();
-                var s = Two();
+                var s = Both();
                 var up = true;
                 using var ss = new Session(s, fb, NewCfg(), (ip, port) => Volatile.Read(ref up) ? Up(ip, port) : DownProbe(ip, port), Delay);
                 ss.ConnectAsync().Wait(2000);
                 Volatile.Write(ref up, false);
-                s.Apps[1].Enabled = false;
+                s.DirectApps[0].Enabled = false;
                 ss.AppsChanged();
                 Thread.Sleep(300);
                 Check(ss.State == ConnState.Disconnected && ss.Error == "Прокси недоступен: таймаут подключения" && !fb.Running && fb.Starts == 1
@@ -1546,6 +1550,52 @@ static class Program
                 lock (probed) bypassProbed = probed.Contains(1090);
                 Check(ss.State == ConnState.Connected && fb.Starts == 1 && bypassProbed && ss.Live == new Exits(true, true) && AppRule(rules, "bypass") != null,
                     "Session: во время проверки появился список «Мимо Podkop» -> его порт проверяется до запуска");
+            }
+
+            // --- горячее применение (SOCKS5) ---
+            {
+                var fb = new FakeSingBox();
+                var s = Two();
+                var cfg = NewCfg();
+                using var ss = new Session(s, fb, cfg, Up, Delay);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                s.Apps[1].Enabled = false;
+                ss.AppsChanged();
+                lock (logs)
+                    Check(fb.Starts == 1 && fb.Stops == 0 && ss.State == ConnState.Connected && CfgApps(cfg).SequenceEqual(new[] { "chrome.exe" })
+                          && logs.Contains("Правила обновлены без перезапуска"),
+                        "Session: программу выключили -> apps.json обновлён без перезапуска");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Two();
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                s.Apps.Add(new AppEntry { Path = @"C:\c\Discord.exe" });
+                ss.AppsChanged();
+                lock (logs)
+                {
+                    int i = logs.LastIndexOf("Правила обновлены без перезапуска");
+                    Check(i >= 0 && i + 1 < logs.Count && logs[i + 1] == "Перезапустите выбранные приложения: уже открытые соединения остаются прямыми.",
+                        "Session: добавлена программа -> после строки обновления напоминание перезапустить приложения");
+                }
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Two();
+                s.DirectPort = 1090;
+                var cfg = NewCfg();
+                using var ss = new Session(s, fb, cfg, Up, Delay);
+                ss.ConnectAsync().Wait(2000);
+                s.DirectApps = A(@"C:\q\qbittorrent.exe"); // список «Мимо Podkop» стал непустым: другой выход, перезапуск
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                Check(fb.Starts == 2 && ss.State == ConnState.Connected && RuleNames(RulesOf(cfg), RuleFiles.Bypass).SequenceEqual(new[] { "qbittorrent.exe" }),
+                    "Session: первая программа «Мимо Podkop» -> перезапуск, bypass.json с ней");
             }
 
             // --- VLESS ---
@@ -1652,15 +1702,144 @@ static class Program
                 ss.Log += l => { lock (logs) logs.Add(l); };
                 ss.ConnectAsync().Wait(2000);
                 s.Lists.Add("telegram");
-                ss.AppsChanged();
-                bool restarting = ss.State == ConnState.Restarting;
-                Thread.Sleep(300);
+                ss.AppsChanged(); // горячее применение синхронно: сразу после возврата всё готово
                 string[] last;
                 lock (fv.Prepared) last = fv.Prepared[^1];
-                Check(restarting && fb.Starts == 2 && ss.State == ConnState.Connected && CfgLists(cfg).SequenceEqual(new[] { "youtube", "telegram" })
-                      && last.SequenceEqual(new[] { "youtube", "telegram" }) && fv.AfterStarts == 2,
-                    "Session VLESS: список включён во время работы -> перезапуск, списки готовятся заново");
-                lock (logs) Check(logs.Contains("Перезапуск sing-box: приложения или списки изменены"), "Session VLESS: строка перезапуска");
+                var tg = File.ReadAllBytes(RuleFiles.PathOf(RulesOf(cfg), RuleFiles.ListTag("telegram")));
+                Check(fb.Starts == 1 && fb.Stops == 0 && ss.State == ConnState.Connected && last.SequenceEqual(new[] { "telegram" })
+                      && tg.SequenceEqual(new byte[] { 0x53, 0x52, 0x53 }) && CfgLists(cfg).OrderBy(x => x).SequenceEqual(new[] { "telegram", "youtube" })
+                      && fv.AfterStarts == 1,
+                    "Session VLESS: список включён во время работы -> качается только он, файл на месте, без перезапуска");
+                lock (logs) Check(logs.Contains("Правила обновлены без перезапуска"), "Session VLESS: строка горячего применения");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                var fv = new FakeVless(root);
+                var cfg = NewCfg();
+                using var ss = new Session(s, fb, cfg, Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                var yt = RuleFiles.PathOf(RulesOf(cfg), RuleFiles.ListTag("youtube"));
+                s.Lists.Clear();
+                ss.AppsChanged();
+                bool emptied = File.ReadAllBytes(yt).SequenceEqual(RuleFiles.EmptySrs);
+                s.Lists.Add("youtube");
+                ss.AppsChanged();
+                Check(emptied && !File.ReadAllBytes(yt).SequenceEqual(RuleFiles.EmptySrs) && fv.Prepares == 1 && fb.Starts == 1 && fb.Stops == 0 && ss.State == ConnState.Connected,
+                    "Session VLESS: список выключили (пустой SRS) и включили снова -> копия на месте, заново не качается");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                var fv = new FakeVless(root);
+                var cfg = NewCfg();
+                using var ss = new Session(s, fb, cfg, Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                s.Sites.Add("example.com");
+                ss.AppsChanged();
+                var sites = File.ReadAllText(RuleFiles.PathOf(RulesOf(cfg), RuleFiles.Sites));
+                Check(fb.Starts == 1 && fb.Stops == 0 && ss.State == ConnState.Connected && sites.Contains("example.com") && fv.Prepares == 1,
+                    "Session VLESS: добавлен свой сайт -> sites.json, без перезапуска и без скачивания");
+            }
+            {
+                // «Отключить» во время скачивания нового списка: ничего не пишем, ошибки нет
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                var cfg = NewCfg();
+                using var inPrepare = new ManualResetEventSlim();
+                using var release = new ManualResetEventSlim();
+                int calls = 0;
+                var fv = new FakeVless(root, lists: ids =>
+                {
+                    if (Interlocked.Increment(ref calls) == 1) return new ListsResult(new Dictionary<string, string> { ["youtube"] = Path.Combine(root, "yt.srs") }, [], []);
+                    inPrepare.Set();
+                    release.Wait(5000);
+                    return new ListsResult(new Dictionary<string, string> { ["telegram"] = Path.Combine(root, "tg.srs") }, [], []);
+                });
+                File.WriteAllBytes(Path.Combine(root, "yt.srs"), new byte[] { 1 });
+                File.WriteAllBytes(Path.Combine(root, "tg.srs"), new byte[] { 2 });
+                using var ss = new Session(s, fb, cfg, Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                s.Lists.Add("telegram");
+                var change = Task.Run(ss.AppsChanged);
+                bool blocked = inPrepare.Wait(2000);
+                ss.Disconnect();
+                release.Set();
+                change.Wait(2000);
+                Check(blocked && ss.State == ConnState.Disconnected && ss.Error == null
+                      && File.ReadAllBytes(RuleFiles.PathOf(RulesOf(cfg), RuleFiles.ListTag("telegram"))).SequenceEqual(RuleFiles.EmptySrs),
+                    "Session VLESS: Disconnect во время скачивания нового списка -> файл не записан, ошибки нет");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                int calls = 0;
+                var cfg = NewCfg();
+                var fv = new FakeVless(root, lists: ids => Interlocked.Increment(ref calls) == 1
+                    ? new ListsResult(new Dictionary<string, string> { ["youtube"] = Path.Combine(root, "yt.srs") }, [], []) : NoFiles(ids.ToArray()));
+                File.WriteAllBytes(Path.Combine(root, "yt.srs"), new byte[] { 1 });
+                using var ss = new Session(s, fb, cfg, Up, Delay, fv.Deps);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                s.Lists.Add("telegram");
+                ss.AppsChanged();
+                lock (logs)
+                    Check(ss.State == ConnState.Connected && fb.Starts == 1 && logs.Contains("ВНИМАНИЕ: Список Telegram не загрузился")
+                          && File.ReadAllBytes(RuleFiles.PathOf(RulesOf(cfg), RuleFiles.ListTag("telegram"))).SequenceEqual(RuleFiles.EmptySrs),
+                        "Session VLESS: новый список не загрузился -> предупреждение в логе, подключено, файл пустой");
+            }
+            {
+                // Review Focus 3: запись правил не удалась
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                var cfg = NewCfg();
+                using var ss = new Session(s, fb, cfg, Up, Delay, new FakeVless(root).Deps);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                Directory.Delete(RulesOf(cfg), true);
+                File.WriteAllText(RulesOf(cfg), "не папка");
+                s.Apps[0].Enabled = false;
+                ss.AppsChanged();
+                lock (logs)
+                    Check(ss.State == ConnState.Connected && fb.Starts == 1 && logs.Any(l => l.StartsWith("Не удалось обновить правила: ")),
+                        "Session VLESS: правила не записались -> Connected, строка в логе");
+            }
+            {
+                // без программ и списков, только свой сайт
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                s.Apps.Clear();
+                s.Lists.Clear();
+                s.Sites.Add("example.com");
+                var fv = new FakeVless(root);
+                var cfg = NewCfg();
+                using var ss = new Session(s, fb, cfg, Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Connected && ss.Error == null && fv.Prepares == 0
+                      && File.ReadAllText(RuleFiles.PathOf(RulesOf(cfg), RuleFiles.Sites)).Contains("example.com"),
+                    "Session VLESS: только свой сайт -> подключено, списки не готовятся");
+            }
+            {
+                // убрали программу и список, остался сайт; убрали и сайт
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                s.Sites.Add("example.com");
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, new FakeVless(root).Deps);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                s.Apps[0].Enabled = false;
+                s.Lists.Clear();
+                ss.AppsChanged();
+                bool stillUp = ss.State == ConnState.Connected && fb.Starts == 1;
+                s.Sites.Clear();
+                ss.AppsChanged();
+                lock (logs)
+                    Check(stillUp && ss.State == ConnState.Disconnected && ss.Error == null && !fb.Running
+                          && logs.Contains("Отключено: нет включённых приложений, сайтов и списков"),
+                        "Session VLESS: остался только сайт -> работает; убран и он -> отключено, строка в логе");
             }
             {
                 var fb = new FakeSingBox();
@@ -1670,11 +1849,10 @@ static class Program
                 ss.ConnectAsync().Wait(2000);
                 s.Lists.Add("telegram");
                 ss.AppsChanged();
-                bool restarting = ss.State == ConnState.Restarting;
                 s.Lists.Remove("telegram");
                 ss.AppsChanged();
                 Thread.Sleep(300);
-                Check(restarting && ss.State == ConnState.Connected && fb.Starts == 1 && fb.Stops == 0 && fv.Prepares == 1,
+                Check(ss.State == ConnState.Connected && fb.Starts == 1 && fb.Stops == 0 && fv.Prepares == 2,
                     "Session VLESS: список включили и сразу выключили -> без перезапуска");
             }
             {
@@ -1698,14 +1876,13 @@ static class Program
                 ss.ConnectAsync().Wait(2000);
                 s.Apps[0].Enabled = false;
                 ss.AppsChanged();
-                bool still = ss.State == ConnState.Restarting; // остался список: перезапуск, не отключение
-                Thread.Sleep(300);
+                bool still = ss.State == ConnState.Connected; // остался список: правила обновлены, не отключение
                 s.Lists.Clear();
                 ss.AppsChanged();
                 Thread.Sleep(150);
                 lock (logs)
-                    Check(still && ss.State == ConnState.Disconnected && ss.Error == null && fb.Starts == 2 && !fb.Running
-                          && logs.Contains("Отключено: нет включённых приложений и списков"),
+                    Check(still && ss.State == ConnState.Disconnected && ss.Error == null && fb.Starts == 1 && !fb.Running
+                          && logs.Contains("Отключено: нет включённых приложений, сайтов и списков"),
                         "Session VLESS: убраны программа и все списки -> отключено, строка в логе");
             }
             {
@@ -1739,46 +1916,6 @@ static class Program
                 bool done = t.Wait(2000);
                 Check(inCheck && done && took < TimeSpan.FromSeconds(1) && ss.State == ConnState.Disconnected && ss.Error == null && !fb.Running && fb.Starts == 1,
                     "Session VLESS: Disconnect во время проверки после запуска -> быстро, sing-box остановлен, без ошибки");
-            }
-            {
-                var fb = new FakeSingBox();
-                var s = Vless1();
-                int calls = 0;
-                using var started = new ManualResetEventSlim();
-                var fv = new FakeVless(root, afterStart: (_, _, ct) =>
-                {
-                    if (Interlocked.Increment(ref calls) == 1) return null;
-                    started.Set(); // проверка после перезапуска висит
-                    ct.WaitHandle.WaitOne(5000);
-                    return "VLESS-сервер не отвечает";
-                });
-                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
-                ss.ConnectAsync().Wait(2000);
-                s.Lists.Add("telegram");
-                ss.AppsChanged();
-                bool inCheck = started.Wait(2000);
-                var sw = System.Diagnostics.Stopwatch.StartNew();
-                ss.Disconnect();
-                var took = sw.Elapsed;
-                Thread.Sleep(100);
-                Check(inCheck && took < TimeSpan.FromSeconds(1) && ss.State == ConnState.Disconnected && ss.Error == null && !fb.Running && fb.Starts == 2,
-                    "Session VLESS: Disconnect во время проверки после перезапуска -> быстро, sing-box остановлен, без ошибки");
-            }
-            {
-                var fb = new FakeSingBox();
-                var s = Vless1();
-                int calls = 0;
-                var fv = new FakeVless(root, afterStart: (_, _, _) => Interlocked.Increment(ref calls) == 1 ? null : DnsDown);
-                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
-                var logs = new List<string>();
-                ss.Log += l => { lock (logs) logs.Add(l); };
-                ss.ConnectAsync().Wait(2000);
-                s.Lists.Add("telegram");
-                ss.AppsChanged();
-                Thread.Sleep(300);
-                lock (logs)
-                    Check(ss.State == ConnState.Disconnected && ss.Error == DnsDown && !fb.Running && fb.Starts == 2 && logs.Contains(DnsDown),
-                        "Session VLESS: DNS не ответил при перезапуске -> sing-box остановлен, ошибка");
             }
             {
                 var fb = new FakeSingBox();

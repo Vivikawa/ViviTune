@@ -49,11 +49,11 @@ public sealed record Verdict(Exits Live, IReadOnlyList<string> Warnings, string?
 public sealed class Session : IDisposable
 {
     const string RestartMsg = "Перезапуск sing-box: список приложений изменён";
-    const string VlessRestartMsg = "Перезапуск sing-box: приложения или списки изменены";
     const string CrashMsg = "sing-box завершился, прокси не работает";
     const string ReopenMsg = "Перезапустите выбранные приложения: уже открытые соединения остаются прямыми.";
     const string NoAppsMsg = "Отключено: нет включённых приложений";
-    const string VlessNoRulesMsg = "Отключено: нет включённых приложений и списков";
+    const string VlessNoRulesMsg = "Отключено: нет включённых приложений, сайтов и списков";
+    const string HotMsg = "Правила обновлены без перезапуска";
     const string WarnPrefix = "ВНИМАНИЕ: ";
     const string NoUdpWarn = "UDP через этот прокси не работает: игры и голосовая связь могут не заработать.";
     const string BypassNoUdpWarn = "UDP через порт «Мимо Podkop» не работает: игры и голосовая связь в этих программах могут не заработать.";
@@ -76,6 +76,7 @@ public sealed class Session : IDisposable
     ConnState state;
     string? error;
     bool? udpOk;
+    VlessPrep? prep;                          // с чем работает sing-box в VLESS: сервер и копии списков (заменяется целиком)
     Exits live;                               // выходы, с которыми запущен текущий sing-box
     IReadOnlyList<string> warnings = [];      // предупреждения последней проверки (список не меняется, только заменяется)
     DateTime? since;
@@ -83,7 +84,7 @@ public sealed class Session : IDisposable
     Settings? applied;  // снимок, с которым запущен текущий sing-box
     TrafficMeter? meter;
     int attempt;        // меняется при Connect/Disconnect: устаревшая проверка выходов ничего не запускает
-    int ticket;         // номер последнего AppsChanged: перезапуск делает только он
+    int ticket;         // номер последнего AppsChanged: перезапуск или горячее применение делает только он
     int epoch;          // меняется при каждом входе в Connected
     CancellationTokenSource cts = new(); // отмена проверки после запуска; Disconnect отменяет и заменяет новым
     bool disposed;
@@ -155,7 +156,7 @@ public sealed class Session : IDisposable
     public void AppsChanged()
     {
         var snap = settings.Clone();
-        bool none = Needs(snap) == (false, false), entered = false, schedule = false;
+        bool none = Needs(snap) == (false, false), entered = false, schedule = false, hot = false;
         int t = 0;
         lock (gate)
         {
@@ -168,13 +169,19 @@ public sealed class Session : IDisposable
                 if (state != ConnState.Checking)
                 {
                     t = ++ticket;
-                    schedule = true;
-                    if (state == ConnState.Connected) { state = ConnState.Restarting; entered = true; }
+                    // те же выходы: правила лежат в файлах, sing-box перечитает их сам
+                    if (state == ConnState.Connected && SameExits(snap, applied!)) hot = true;
+                    else
+                    {
+                        schedule = true;
+                        if (state == ConnState.Connected) { state = ConnState.Restarting; entered = true; }
+                    }
                 }
             }
         }
         if (none) { Disconnect(snap.Mode == ProxyMode.Vless ? VlessNoRulesMsg : NoAppsMsg); return; } // правило без приложений матчило бы весь трафик
         if (entered) Raise(true);
+        if (hot) HotApply(t); // в потоке вызывающего: App вызывает по одному, скачивание списка здесь допустимо
         if (schedule) ScheduleRestart(t);
     }
 
@@ -199,7 +206,7 @@ public sealed class Session : IDisposable
             var v = CheckExits(snap); // вне блокировок: Disconnect и AppsChanged в это время не ждут
 
             string? fail = null;
-            bool restart = false;
+            bool restart = false, hot = false;
             int t = 0;
             lock (ops)
             {
@@ -235,9 +242,13 @@ public sealed class Session : IDisposable
                             warnings = v.Warnings;
                             udpOk = v.UdpOk;
                             since = DateTime.Now;
-                            restart = !ReferenceEquals(used, latest); // список изменили, пока запускались
+                            prep = v.Vless;
+                            // список изменили, пока запускались: те же правила — ничего; те же выходы — файлы; иначе перезапуск
+                            bool changed = !ReferenceEquals(used, latest) && !SameRules(used, latest!);
+                            hot = changed && SameExits(latest!, used);
+                            restart = changed && !hot;
                             if (restart) { state = ConnState.Restarting; t = ++ticket; }
-                            else { state = ConnState.Connected; epoch++; }
+                            else { state = ConnState.Connected; epoch++; if (hot) t = ++ticket; }
                         }
                     }
                     if (!keep || fail != null) { m?.Dispose(); sb.Stop(); }
@@ -247,7 +258,11 @@ public sealed class Session : IDisposable
             if (fail != null) { Raise(false, fail); return; }
             Raise(false, WithWarnings(ReopenMsg, v));
             if (restart) ScheduleRestart(t); // перезапуск проверит выходы заново
-            else OnExited(); // sing-box мог упасть сразу после запуска, пока мы были в Checking
+            else
+            {
+                OnExited(); // sing-box мог упасть сразу после запуска, пока мы были в Checking
+                if (hot) HotApply(t);
+            }
             return;
         }
     }
@@ -266,7 +281,7 @@ public sealed class Session : IDisposable
         }
         // Вне блокировок: старый sing-box пока работает, AppsChanged и Disconnect в это время не ждут.
         var v = CheckExits(snap);
-        var msg = snap.Mode == ProxyMode.Vless ? VlessRestartMsg : RestartMsg;
+        const string msg = RestartMsg;
 
         string? fail = v.Error;
         bool connected = false;
@@ -300,6 +315,7 @@ public sealed class Session : IDisposable
                     {
                         meter = m;
                         applied = snap;
+                        prep = v.Vless;
                         live = v.Live;
                         warnings = v.Warnings;
                         udpOk = v.UdpOk;
@@ -315,40 +331,104 @@ public sealed class Session : IDisposable
         if (connected) OnExited();
     }
 
-    // Набор вернули к тому, с которым sing-box уже запущен (выключили и включили обратно): не перезапускаем,
-    // соединения не рвутся. Под ops: перезапуск, который ещё идёт, сначала закончится и обновит applied.
+    // Выходы те же, что у запущенного sing-box (выключили и включили обратно, либо изменились только правила):
+    // не перезапускаем, соединения не рвутся. Под ops: перезапуск, который ещё идёт, сначала закончится и обновит applied.
     bool KeepRunning(int t)
     {
+        bool rewritten = false;
         lock (ops)
             lock (gate)
             {
-                if (t != ticket || state != ConnState.Restarting || !SameRules(latest!, applied!)) return false;
+                if (t != ticket || state != ConnState.Restarting || !SameExits(latest!, applied!)) return false;
+                if (!SameRules(latest!, applied!))
+                {
+                    // копий списков здесь не качаем: нет какой-то — пусть решает перезапуск
+                    if (latest!.Mode == ProxyMode.Vless && !latest.Lists.All(id => prep?.ListFiles.ContainsKey(id) == true)) return false;
+                    try { RuleFiles.Write(rulesDir, latest!, prep?.ListFiles ?? new Dictionary<string, string>()); }
+                    catch { return false; } // перезапуск запишет файлы заново и сообщит об ошибке
+                    applied = latest;
+                    rewritten = true;
+                }
                 state = ConnState.Connected;
                 epoch++;
             }
-        Raise(false);
+        Raise(false, rewritten ? HotMsg : null);
         OnExited(); // sing-box мог упасть, пока мы были в Restarting
         return true;
+    }
+
+    // Горячее применение: правила пишутся в файлы, sing-box перечитывает их сам. Вызывать без блокировок.
+    // t — номер AppsChanged (или Connect): отключение или изменение новее отменяет эту запись.
+    void HotApply(int t)
+    {
+        Settings snap, before;
+        VlessPrep? p;
+        lock (gate)
+        {
+            if (t != ticket || state != ConnState.Connected) return;
+            snap = latest!;
+            before = applied!;
+            p = prep;
+        }
+        // Копии новых списков качаем вне блокировок; уже имеющиеся (и у выключенных) используем снова.
+        VlessPrep? newPrep = null;
+        var logs = new List<string>();
+        if (snap.Mode == ProxyMode.Vless && p != null && vless != null)
+        {
+            var missing = snap.Lists.Where(id => !p.ListFiles.ContainsKey(id)).ToList();
+            if (missing.Count > 0)
+            {
+                ListsResult r;
+                try { r = vless.PrepareLists(missing, snap.VlessLink, p.Server); }
+                catch { r = new ListsResult(new Dictionary<string, string>(), missing, []); } // ни один не скачался
+                foreach (var id in r.Stale) Log?.Invoke($"Список {ListName(id)} не обновился, работаю со старой копией");
+                foreach (var id in r.Failed) logs.Add($"{WarnPrefix}Список {ListName(id)} не загрузился");
+                var files = new Dictionary<string, string>(p.ListFiles);
+                foreach (var kv in r.Files) files[kv.Key] = kv.Value;
+                newPrep = p with { ListFiles = files };
+            }
+        }
+        string? err = null;
+        lock (ops)
+            lock (gate)
+            {
+                if (t != ticket || state != ConnState.Connected) return; // отключили или пришло изменение новее: ничего не пишем
+                if (newPrep != null) prep = newPrep;
+                try
+                {
+                    RuleFiles.Write(rulesDir, snap, prep?.ListFiles ?? new Dictionary<string, string>());
+                    applied = snap;
+                }
+                catch (Exception e) { err = e.Message; } // applied прежний: следующее изменение попробует снова
+            }
+        if (err != null) { Raise(false, [.. logs, "Не удалось обновить правила: " + err]); return; }
+        var old = before.ProcessNames();
+        bool added = snap.ProcessNames().Any(n => !old.Contains(n, StringComparer.OrdinalIgnoreCase));
+        Raise(false, [HotMsg, added ? ReopenMsg : null, .. logs]);
     }
 
     // Те же имена .exe в обоих списках программ и тот же набор списков сайтов (без учёта регистра и порядка) —
     // те же правила sing-box. Выходы при этом заново не проверяются.
     static bool SameRules(Settings a, Settings b) =>
-        Same(a.ProcessNames(), b.ProcessNames()) && Same(a.BypassNames(), b.BypassNames()) && Same(a.Lists, b.Lists);
+        Same(a.ProcessNames(), b.ProcessNames()) && Same(a.BypassNames(), b.BypassNames())
+        && Same(a.Lists, b.Lists) && Same(a.Sites, b.Sites);
+
+    // Те же выходы: режим и какие из них нужны. Конфиг sing-box тот же, правила различаются только файлами.
+    static bool SameExits(Settings a, Settings b) => a.Mode == b.Mode && Needs(a) == Needs(b);
 
     static bool Same(List<string> a, List<string> b) => a.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(b);
 
     // Какие списки непусты: в SOCKS5 — включённые программы «Через прокси» и «Мимо Podkop»;
     // в VLESS выход один, и ему нужны программы или списки сайтов.
     static (bool Proxy, bool Bypass) Needs(Settings s) => s.Mode == ProxyMode.Vless
-        ? (s.ProcessNames().Count > 0 || s.Lists.Count > 0, false)
+        ? (s.ProcessNames().Count > 0 || s.Lists.Count > 0 || s.Sites.Count > 0, false)
         : (s.ProcessNames().Count > 0, s.BypassNames().Count > 0);
 
     // Итог проверки снимка b годится для снимка a: непусты те же списки программ, а в VLESS ещё тот же набор
-    // списков сайтов (их копии готовились для b) и программы есть в обоих или ни в одном (без них нужен хоть один файл).
+    // списков сайтов (их копии готовились для b) и программы или сайты есть в обоих или ни в одном (без них нужен хоть один файл).
     static bool SameChecks(Settings a, Settings b) =>
-        a.Mode == b.Mode && Needs(a) == Needs(b) && (a.Mode != ProxyMode.Vless
-            || Same(a.Lists, b.Lists) && (a.ProcessNames().Count > 0) == (b.ProcessNames().Count > 0));
+        SameExits(a, b) && (a.Mode != ProxyMode.Vless
+            || Same(a.Lists, b.Lists) && (a.ProcessNames().Count + a.Sites.Count > 0) == (b.ProcessNames().Count + b.Sites.Count > 0));
 
     // Проверяет только нужные выходы снимка: прокси (Ip, Port) — при программах «Через прокси», «Мимо Podkop»
     // (Ip, DirectPort) — при её программах и указанном порте. Оба сразу, до ~3 с каждый: вызывать вне блокировок.
@@ -421,7 +501,7 @@ public sealed class Session : IDisposable
     // ошибка: правил для sing-box нет. Предупреждения — в порядке lists.Failed.
     public static Verdict EvaluateVless(Settings s, IPAddress server, ListsResult lists)
     {
-        if (s.ProcessNames().Count == 0 && lists.Files.Count == 0) return ErrorVerdict("Списки не загрузились");
+        if (s.ProcessNames().Count == 0 && s.Sites.Count == 0 && lists.Files.Count == 0) return ErrorVerdict("Списки не загрузились");
         var w = lists.Failed.Select(id => $"Список {ListName(id)} не загрузился").ToList();
         return new Verdict(new Exits(true, false), w, null, null, new VlessPrep(server, lists.Files));
     }
@@ -495,6 +575,7 @@ public sealed class Session : IDisposable
         state = ConnState.Disconnected;
         error = err;
         udpOk = null;
+        prep = null;
         live = default;
         warnings = [];
         since = null;
