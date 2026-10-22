@@ -330,28 +330,39 @@ public sealed class Session : IDisposable
         else Raise(false, WithWarnings(msg, v));
         if (connected) OnExited();
     }
-
     // Выходы те же, что у запущенного sing-box (выключили и включили обратно, либо изменились только правила):
     // не перезапускаем, соединения не рвутся. Под ops: перезапуск, который ещё идёт, сначала закончится и обновит applied.
+    // Файлы пишутся под ops, но не под gate (занятый файл — повторы до ~1 с, State читает UI).
     bool KeepRunning(int t)
     {
         bool rewritten = false;
         lock (ops)
+        {
+            Settings snap;
+            VlessPrep? p;
             lock (gate)
             {
                 if (t != ticket || state != ConnState.Restarting || !SameExits(latest!, applied!)) return false;
-                if (!SameRules(latest!, applied!))
-                {
-                    // копий списков здесь не качаем: нет какой-то — пусть решает перезапуск
-                    if (latest!.Mode == ProxyMode.Vless && !latest.Lists.All(id => prep?.ListFiles.ContainsKey(id) == true)) return false;
-                    try { RuleFiles.Write(rulesDir, latest!, prep?.ListFiles ?? new Dictionary<string, string>()); }
-                    catch { return false; } // перезапуск запишет файлы заново и сообщит об ошибке
-                    applied = latest;
-                    rewritten = true;
-                }
-                state = ConnState.Connected;
-                epoch++;
+                snap = latest!;
+                p = prep;
+                if (SameRules(snap, applied!)) { state = ConnState.Connected; epoch++; }
+                // копий списков здесь не качаем: нет какой-то — пусть решает перезапуск
+                else if (snap.Mode == ProxyMode.Vless && !snap.Lists.All(id => p?.ListFiles.ContainsKey(id) == true)) return false;
+                else rewritten = true;
             }
+            if (rewritten)
+            {
+                try { RuleFiles.Write(rulesDir, snap, p?.ListFiles ?? new Dictionary<string, string>()); }
+                catch { return false; } // перезапуск запишет файлы заново и сообщит об ошибке
+                lock (gate)
+                {
+                    if (t != ticket || state != ConnState.Restarting) return false; // файлы записаны, applied не трогаем
+                    applied = snap;
+                    state = ConnState.Connected;
+                    epoch++;
+                }
+            }
+        }
         Raise(false, rewritten ? HotMsg : null);
         OnExited(); // sing-box мог упасть, пока мы были в Restarting
         return true;
@@ -359,52 +370,72 @@ public sealed class Session : IDisposable
 
     // Горячее применение: правила пишутся в файлы, sing-box перечитывает их сам. Вызывать без блокировок.
     // t — номер AppsChanged (или Connect): отключение или изменение новее отменяет эту запись.
+    // Правки, не менявшие ticket (вернули к applied), сходятся здесь же: после записи смотрим на latest заново.
+    // Файлы пишутся под ops, но не под gate; applied обновляется только после повторной проверки ticket/state.
     void HotApply(int t)
     {
-        Settings snap, before;
-        VlessPrep? p;
-        lock (gate)
-        {
-            if (t != ticket || state != ConnState.Connected) return;
-            snap = latest!;
-            before = applied!;
-            p = prep;
-        }
-        // Копии новых списков качаем вне блокировок; уже имеющиеся (и у выключенных) используем снова.
-        VlessPrep? newPrep = null;
+        Settings? first = null, last = null; // applied до первой удачной записи и после последней
         var logs = new List<string>();
-        if (snap.Mode == ProxyMode.Vless && p != null && vless != null)
-        {
-            var missing = snap.Lists.Where(id => !p.ListFiles.ContainsKey(id)).ToList();
-            if (missing.Count > 0)
-            {
-                ListsResult r;
-                try { r = vless.PrepareLists(missing, snap.VlessLink, p.Server); }
-                catch { r = new ListsResult(new Dictionary<string, string>(), missing, []); } // ни один не скачался
-                foreach (var id in r.Stale) Log?.Invoke($"Список {ListName(id)} не обновился, работаю со старой копией");
-                foreach (var id in r.Failed) logs.Add($"{WarnPrefix}Список {ListName(id)} не загрузился");
-                var files = new Dictionary<string, string>(p.ListFiles);
-                foreach (var kv in r.Files) files[kv.Key] = kv.Value;
-                newPrep = p with { ListFiles = files };
-            }
-        }
         string? err = null;
-        lock (ops)
+        while (true)
+        {
+            Settings snap, prev;
+            VlessPrep? p;
             lock (gate)
             {
-                if (t != ticket || state != ConnState.Connected) return; // отключили или пришло изменение новее: ничего не пишем
-                if (newPrep != null) prep = newPrep;
-                try
-                {
-                    RuleFiles.Write(rulesDir, snap, prep?.ListFiles ?? new Dictionary<string, string>());
-                    applied = snap;
-                }
-                catch (Exception e) { err = e.Message; } // applied прежний: следующее изменение попробует снова
+                if (t != ticket || state != ConnState.Connected) break;
+                snap = latest!;
+                prev = applied!;
+                p = prep;
             }
-        if (err != null) { Raise(false, [.. logs, "Не удалось обновить правила: " + err]); return; }
-        var old = before.ProcessNames();
-        bool added = snap.ProcessNames().Any(n => !old.Contains(n, StringComparer.OrdinalIgnoreCase));
-        Raise(false, [HotMsg, added ? ReopenMsg : null, .. logs]);
+            if (SameRules(snap, prev)) break; // сошлись
+            // Копии новых списков качаем вне блокировок; уже имеющиеся (и у выключенных) используем снова.
+            VlessPrep? newPrep = null;
+            if (snap.Mode == ProxyMode.Vless && p != null && vless != null)
+            {
+                var missing = snap.Lists.Where(id => !p.ListFiles.ContainsKey(id)).ToList();
+                if (missing.Count > 0)
+                {
+                    ListsResult r;
+                    try { r = vless.PrepareLists(missing, snap.VlessLink, p.Server); }
+                    catch { r = new ListsResult(new Dictionary<string, string>(), missing, []); } // ни один не скачался
+                    foreach (var id in r.Stale) Log?.Invoke($"Список {ListName(id)} не обновился, работаю со старой копией");
+                    foreach (var id in r.Failed) logs.Add($"{WarnPrefix}Список {ListName(id)} не загрузился");
+                    var files = new Dictionary<string, string>(p.ListFiles);
+                    foreach (var kv in r.Files) files[kv.Key] = kv.Value;
+                    newPrep = p with { ListFiles = files };
+                }
+            }
+            bool ok = false;
+            lock (ops)
+            {
+                lock (gate) ok = t == ticket && state == ConnState.Connected;
+                if (!ok) break; // отключили или пришло изменение новее: ничего не пишем
+                try { RuleFiles.Write(rulesDir, snap, (newPrep ?? p)?.ListFiles ?? new Dictionary<string, string>()); }
+                catch (Exception e) { err = e.Message; } // applied прежний: следующее изменение попробует снова
+                lock (gate)
+                {
+                    ok = t == ticket && state == ConnState.Connected;
+                    if (ok)
+                    {
+                        if (newPrep != null) prep = newPrep;
+                        if (err == null) { applied = snap; first ??= prev; last = snap; }
+                    }
+                }
+            }
+            if (!ok || err != null) break;
+        }
+        if (first == null && err == null) return;
+        var logOut = new List<string?>();
+        if (first != null)
+        {
+            var old = first.ProcessNames();
+            logOut.Add(HotMsg);
+            if (last!.ProcessNames().Any(n => !old.Contains(n, StringComparer.OrdinalIgnoreCase))) logOut.Add(ReopenMsg);
+        }
+        logOut.AddRange(logs);
+        if (err != null) logOut.Add("Не удалось обновить правила: " + err);
+        Raise(false, [.. logOut]);
     }
 
     // Те же имена .exe в обоих списках программ и тот же набор списков сайтов (без учёта регистра и порядка) —

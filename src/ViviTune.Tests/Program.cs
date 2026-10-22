@@ -1771,6 +1771,38 @@ static class Program
                     "Session VLESS: Disconnect во время скачивания нового списка -> файл не записан, ошибки нет");
             }
             {
+                // вернули к applied, пока горячее применение ждёт скачивания: записанное устаревшее правило не остаётся
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                var cfg = NewCfg();
+                using var inPrepare = new ManualResetEventSlim();
+                using var release = new ManualResetEventSlim();
+                int calls = 0;
+                File.WriteAllBytes(Path.Combine(root, "yt2.srs"), new byte[] { 1 });
+                File.WriteAllBytes(Path.Combine(root, "tg2.srs"), new byte[] { 2 });
+                var fv = new FakeVless(root, lists: ids =>
+                {
+                    if (Interlocked.Increment(ref calls) == 1) return new ListsResult(new Dictionary<string, string> { ["youtube"] = Path.Combine(root, "yt2.srs") }, [], []);
+                    inPrepare.Set();
+                    release.Wait(5000);
+                    return new ListsResult(new Dictionary<string, string> { ["telegram"] = Path.Combine(root, "tg2.srs") }, [], []);
+                });
+                using var ss = new Session(s, fb, cfg, Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                s.Lists.Add("telegram");
+                var change = Task.Run(ss.AppsChanged);
+                bool blocked = inPrepare.Wait(2000);
+                s.Lists.Remove("telegram");
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                ss.AppsChanged(); // правила как у applied: возвращается сразу
+                var took = sw.Elapsed;
+                release.Set();
+                bool done = change.Wait(3000);
+                Check(blocked && done && took < TimeSpan.FromSeconds(1) && ss.State == ConnState.Connected && fb.Starts == 1
+                      && File.ReadAllBytes(RuleFiles.PathOf(RulesOf(cfg), RuleFiles.ListTag("telegram"))).SequenceEqual(RuleFiles.EmptySrs),
+                    "Session VLESS: список включили и вернули, пока он качался -> в файлах итоговое состояние");
+            }
+            {
                 var fb = new FakeSingBox();
                 var s = Vless1();
                 int calls = 0;
