@@ -13,25 +13,29 @@ namespace ViviTune
 
     public static class ConfigBuilder
     {
-        static readonly JsonCtx Json = new(new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        internal static readonly JsonCtx Json = new(new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 
-        static Dictionary<string, object> D(params object[] kv)
+        internal static Dictionary<string, object> D(params object[] kv)
         {
             var d = new Dictionary<string, object>();
             for (int i = 0; i < kv.Length; i += 2) d[(string)kv[i]] = kv[i + 1];
             return d;
         }
 
-        public static string Build(Settings s, int apiPort, string apiSecret, Exits? live = null)
+        // Правила лежат в rule-set'ах (RuleFiles), конфиг только ссылается на них: их можно менять без перезапуска sing-box.
+        static object LocalSet(string rulesDir, string tag, string format = "source") =>
+            D("type", "local", "tag", tag, "format", format, "path", RuleFiles.PathOf(rulesDir, tag));
+
+        public static string Build(Settings s, int apiPort, string apiSecret, string rulesDir, Exits? live = null)
         {
             var err = s.Validate();
             if (err != null) throw new InvalidOperationException(err);
 
             // null: прокси жив, bypass жив, если задан порт
             var l = live ?? new Exits(true, s.DirectPort != null);
-            var proxyNames = l.Proxy ? s.ProcessNames().ToArray() : Array.Empty<string>();
-            var bypassNames = l.Bypass && s.DirectPort != null ? s.BypassNames().ToArray() : Array.Empty<string>();
-            if (proxyNames.Length == 0 && bypassNames.Length == 0)
+            bool proxyRule = l.Proxy && s.ProcessNames().Count > 0;
+            bool bypassRule = l.Bypass && s.DirectPort != null && s.BypassNames().Count > 0;
+            if (!proxyRule && !bypassRule)
                 throw new InvalidOperationException("Нет правил: ни одного живого выхода с программами");
             var ip = IPAddress.Parse(s.Ip);
             var cidr = ip + (ip.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32");
@@ -41,7 +45,7 @@ namespace ViviTune
                 D("type", "socks", "tag", "proxy", "server", ip.ToString(), "server_port", s.Port, "version", "5"),
                 D("type", "direct", "tag", "direct")
             };
-            if (bypassNames.Length > 0)
+            if (bypassRule)
                 outbounds.Add(D("type", "socks", "tag", "bypass", "server", ip.ToString(), "server_port", s.DirectPort!.Value, "version", "5"));
 
             var rules = new List<object>
@@ -50,8 +54,17 @@ namespace ViviTune
                 D("protocol", "dns", "action", "hijack-dns"),
                 D("ip_cidr", new object[] { cidr }, "outbound", "direct")
             };
-            if (proxyNames.Length > 0) rules.Add(D("process_name", proxyNames, "outbound", "proxy"));
-            if (bypassNames.Length > 0) rules.Add(D("process_name", bypassNames, "outbound", "bypass"));
+            var sets = new List<object>();
+            if (proxyRule)
+            {
+                rules.Add(D("rule_set", new[] { RuleFiles.Apps }, "outbound", "proxy"));
+                sets.Add(LocalSet(rulesDir, RuleFiles.Apps));
+            }
+            if (bypassRule)
+            {
+                rules.Add(D("rule_set", new[] { RuleFiles.Bypass }, "outbound", "bypass"));
+                sets.Add(LocalSet(rulesDir, RuleFiles.Bypass));
+            }
 
             var config = Head(apiPort, apiSecret);
             config["dns"] = D(
@@ -60,13 +73,15 @@ namespace ViviTune
                     D("type", "local", "tag", "local"),
                     D("type", "tcp", "tag", "proxy-dns", "server", "1.1.1.1", "detour", "proxy")
                 },
-                "rules", proxyNames.Length > 0 ? new object[] { D("process_name", proxyNames, "server", "proxy-dns") } : Array.Empty<object>());
+                "rules", proxyRule ? new object[] { D("rule_set", new[] { RuleFiles.Apps }, "server", "proxy-dns") } : Array.Empty<object>());
             config["inbounds"] = Tun(false);
             config["outbounds"] = outbounds.ToArray();
             config["route"] = D(
                 "rules", rules.ToArray(),
+                "rule_set", sets.ToArray(),
                 "final", "direct",
                 "auto_detect_interface", true,
+                "find_process", true,
                 "default_domain_resolver", "local");
 
             return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
@@ -85,26 +100,25 @@ namespace ViviTune
             return new object[] { tun };
         }
 
-        // listFiles: id списка -> путь к локальному .srs; server — уже разрешённый IP сервера VLESS.
-        public static string BuildVless(Settings s, int apiPort, string apiSecret, IPAddress server, IReadOnlyDictionary<string, string> listFiles)
+        // server — уже разрешённый IP сервера VLESS; файлы правил (apps, sites, list-*) пишет RuleFiles.Write.
+        public static string BuildVless(Settings s, int apiPort, string apiSecret, IPAddress server, string rulesDir)
         {
             var err = s.Validate();
             if (err != null) throw new InvalidOperationException(err);
-            var names = s.ProcessNames().ToArray();
-            var lists = Catalogs.Lists.Where(l => listFiles.ContainsKey(l.Id)).Select(l => l.Id).ToArray();
-            if (names.Length == 0 && lists.Length == 0)
-                throw new InvalidOperationException("Нет правил: ни одной программы и ни одного списка");
             var cidr = server + (server.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32");
             var proxy = VlessOutbound(s.VlessLink, server);
 
+            // один набор на всё: каждый список каталога всегда в конфиге (выключенный — пустой файл)
+            var sets = new List<object> { LocalSet(rulesDir, RuleFiles.Apps), LocalSet(rulesDir, RuleFiles.Sites) };
+            sets.AddRange(Catalogs.Lists.Select(l => LocalSet(rulesDir, RuleFiles.ListTag(l.Id), "binary")));
+            var tags = new[] { RuleFiles.Apps, RuleFiles.Sites }.Concat(Catalogs.Lists.Select(l => RuleFiles.ListTag(l.Id))).ToArray();
             var rules = new List<object>
             {
                 D("action", "sniff"),
                 D("protocol", "dns", "action", "hijack-dns"),
-                D("ip_cidr", new object[] { cidr }, "outbound", "direct")
+                D("ip_cidr", new object[] { cidr }, "outbound", "direct"),
+                D("rule_set", tags, "outbound", "proxy")
             };
-            if (names.Length > 0) rules.Add(D("process_name", names, "outbound", "proxy"));
-            if (lists.Length > 0) rules.Add(D("rule_set", lists, "outbound", "proxy"));
 
             // весь DNS компьютера — к 1.1.1.1 через туннель: провайдер его не видит и не подменяет.
             // Только IPv4: у многих VLESS-серверов нет IPv6, и соединение к AAAA-адресу молча глохнет (голос Discord).
@@ -113,10 +127,7 @@ namespace ViviTune
             config["dns"] = D("servers", new object[] { D("type", "tcp", "tag", "dns", "server", "1.1.1.1", "detour", "proxy") }, "final", "dns", "strategy", "ipv4_only");
             config["inbounds"] = Tun(true);
             config["outbounds"] = new object[] { proxy, D("type", "direct", "tag", "direct") };
-            var route = D("rules", rules.ToArray(), "final", "direct", "auto_detect_interface", true, "default_domain_resolver", "dns");
-            if (lists.Length > 0)
-                route["rule_set"] = lists.Select(id => (object)D("type", "local", "tag", id, "format", "binary", "path", listFiles[id])).ToArray();
-            config["route"] = route;
+            config["route"] = D("rules", rules.ToArray(), "rule_set", sets.ToArray(), "final", "direct", "auto_detect_interface", true, "find_process", true, "default_domain_resolver", "dns");
             return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
         }
 

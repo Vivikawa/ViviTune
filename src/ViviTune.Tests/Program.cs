@@ -32,10 +32,73 @@ static class Program
         SettingsV5Tests();
         CatalogsTests();
         VlessConfigTests();
+        RuleFilesTests();
         ListStoreTests();
         VlessProbeTests();
         ViewStateVlessTests();
         return failures == 0 ? 0 : 1;
+    }
+
+    static void RuleFilesTests()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "vivitune-rf-" + Guid.NewGuid().ToString("N"));
+        string P(string d, string tag) => RuleFiles.PathOf(d, tag);
+        string Text(string d, string tag) => File.ReadAllText(P(d, tag));
+        try
+        {
+            var d1 = Path.Combine(root, "socks");
+            RuleFiles.Write(d1, Both(), new Dictionary<string, string>());
+            Check(Text(d1, "apps") == "{\"version\":3,\"rules\":[{\"process_name\":[\"chrome.exe\"]}]}" && Text(d1, "bypass") == "{\"version\":3,\"rules\":[{\"process_name\":[\"qbittorrent.exe\"]}]}"
+                && !File.Exists(P(d1, "sites")) && Directory.GetFiles(d1, "list-*").Length == 0, "RuleFiles SOCKS5: apps.json и bypass.json, sites и list-* нет");
+
+            var d2 = Path.Combine(root, "sites");
+            var vs = new Settings { Mode = ProxyMode.Vless, VlessLink = Reality, Sites = new List<string> { "example.com", "1.2.3.4", "10.0.0.0/8" } };
+            RuleFiles.Write(d2, vs, new Dictionary<string, string>());
+            Check(Text(d2, "sites") == "{\"version\":3,\"rules\":[{\"domain_suffix\":[\"example.com\"]},{\"ip_cidr\":[\"1.2.3.4/32\",\"10.0.0.0/8\"]}]}"
+                && Text(d2, "apps") == "{\"version\":3,\"rules\":[]}", "RuleFiles VLESS: sites.json (domain_suffix и ip_cidr), без программ пустой apps.json");
+            Check(RuleFiles.SitesJson(new[] { "example.com" }) == "{\"version\":3,\"rules\":[{\"domain_suffix\":[\"example.com\"]}]}"
+                && RuleFiles.SitesJson(Array.Empty<string>()) == "{\"version\":3,\"rules\":[]}", "RuleFiles.SitesJson: только непустые правила");
+
+            var d3 = Path.Combine(root, "lists");
+            var yt = Path.Combine(root, "yt.srs");
+            var ytBytes = new byte[] { 0x53, 0x52, 0x53, 0x03, 0x01 };
+            Directory.CreateDirectory(root);
+            File.WriteAllBytes(yt, ytBytes);
+            var ls = new Settings { Mode = ProxyMode.Vless, VlessLink = Reality, Lists = new List<string> { "youtube" } };
+            var lf = new Dictionary<string, string> { ["youtube"] = yt, ["telegram"] = yt };
+            RuleFiles.Write(d3, ls, lf);
+            Check(File.ReadAllBytes(P(d3, "list-youtube")).SequenceEqual(ytBytes) && File.ReadAllBytes(P(d3, "list-telegram")).SequenceEqual(RuleFiles.EmptySrs)
+                && Directory.GetFiles(d3, "list-*.srs").Length == Catalogs.Lists.Count, "RuleFiles VLESS: включённый список — копия, остальные — пустой SRS, по файлу на список каталога");
+            Check(RuleFiles.EmptySrs.Length == 17, "RuleFiles.EmptySrs: 17 байт");
+
+            // review focus 1: те же правила — файлы не переписываются
+            var old = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            foreach (var f in Directory.GetFiles(d3)) File.SetLastWriteTimeUtc(f, old);
+            RuleFiles.Write(d3, ls, lf);
+            Check(Directory.GetFiles(d3).All(f => File.GetLastWriteTimeUtc(f) == old), "RuleFiles: те же аргументы -> ни один файл не переписан");
+            ls.Lists.Clear();
+            RuleFiles.Write(d3, ls, lf);
+            Check(File.GetLastWriteTimeUtc(P(d3, "list-youtube")) != old && File.ReadAllBytes(P(d3, "list-youtube")).SequenceEqual(RuleFiles.EmptySrs)
+                && Directory.GetFiles(d3).Where(f => f != P(d3, "list-youtube")).All(f => File.GetLastWriteTimeUtc(f) == old),
+                "RuleFiles: выключили youtube -> изменился только его файл");
+
+            // review focus 2: файл занят (sing-box его читает) — запись ждёт и проходит
+            ls.Lists.Add("youtube");
+            var held = new ManualResetEventSlim();
+            var holder = Task.Run(() =>
+            {
+                using var fs = new FileStream(P(d3, "list-youtube"), FileMode.Open, FileAccess.Read, FileShare.None);
+                held.Set();
+                Thread.Sleep(300);
+            });
+            held.Wait(2000);
+            Exception? ex = null;
+            try { RuleFiles.Write(d3, ls, lf); } catch (Exception e) { ex = e; }
+            holder.Wait(2000);
+            Check(ex == null && File.ReadAllBytes(P(d3, "list-youtube")).SequenceEqual(ytBytes), "RuleFiles: файл занят на 300 мс -> запись дождалась, без исключения");
+            Check(Directory.GetFiles(d3, "*.tmp").Length == 0 && Directory.GetFiles(d1, "*.tmp").Length == 0, "RuleFiles: временных файлов не осталось");
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
     }
 
     static void ListStoreTests()
@@ -108,24 +171,25 @@ static class Program
 
     static void VlessConfigTests()
     {
-        // Эталон SOCKS5 из 2.1: режим SOCKS5 не меняется ни на байт
-        const string Golden = @"{""log"":{""level"":""warn"",""timestamp"":true},""experimental"":{""clash_api"":{""external_controller"":""127.0.0.1:9090"",""secret"":""s""}},""dns"":{""servers"":[{""type"":""local"",""tag"":""local""},{""type"":""tcp"",""tag"":""proxy-dns"",""server"":""1.1.1.1"",""detour"":""proxy""}],""rules"":[{""process_name"":[""chrome.exe"",""Игра.exe""],""server"":""proxy-dns""}]},""inbounds"":[{""type"":""tun"",""tag"":""tun-in"",""address"":[""172.19.0.1/30"",""fdfe:dcba:9876::1/126""],""auto_route"":true,""strict_route"":false}],""outbounds"":[{""type"":""socks"",""tag"":""proxy"",""server"":""192.168.1.1"",""server_port"":1818,""version"":""5""},{""type"":""direct"",""tag"":""direct""},{""type"":""socks"",""tag"":""bypass"",""server"":""192.168.1.1"",""server_port"":1819,""version"":""5""}],""route"":{""rules"":[{""action"":""sniff""},{""protocol"":""dns"",""action"":""hijack-dns""},{""ip_cidr"":[""192.168.1.1/32""],""outbound"":""direct""},{""process_name"":[""chrome.exe"",""Игра.exe""],""outbound"":""proxy""},{""process_name"":[""qbittorrent.exe""],""outbound"":""bypass""}],""final"":""direct"",""auto_detect_interface"":true,""default_domain_resolver"":""local""}}";
+        // Эталон SOCKS5 (2.3): правила в rule-set'ах, в конфиге только ссылки на них
+        const string Golden = @"{""log"":{""level"":""warn"",""timestamp"":true},""experimental"":{""clash_api"":{""external_controller"":""127.0.0.1:9090"",""secret"":""s""}},""dns"":{""servers"":[{""type"":""local"",""tag"":""local""},{""type"":""tcp"",""tag"":""proxy-dns"",""server"":""1.1.1.1"",""detour"":""proxy""}],""rules"":[{""rule_set"":[""apps""],""server"":""proxy-dns""}]},""inbounds"":[{""type"":""tun"",""tag"":""tun-in"",""address"":[""172.19.0.1/30"",""fdfe:dcba:9876::1/126""],""auto_route"":true,""strict_route"":false}],""outbounds"":[{""type"":""socks"",""tag"":""proxy"",""server"":""192.168.1.1"",""server_port"":1818,""version"":""5""},{""type"":""direct"",""tag"":""direct""},{""type"":""socks"",""tag"":""bypass"",""server"":""192.168.1.1"",""server_port"":1819,""version"":""5""}],""route"":{""rules"":[{""action"":""sniff""},{""protocol"":""dns"",""action"":""hijack-dns""},{""ip_cidr"":[""192.168.1.1/32""],""outbound"":""direct""},{""rule_set"":[""apps""],""outbound"":""proxy""},{""rule_set"":[""bypass""],""outbound"":""bypass""}],""rule_set"":[{""type"":""local"",""tag"":""apps"",""format"":""source"",""path"":""C:\\vt\\rules\\apps.json""},{""type"":""local"",""tag"":""bypass"",""format"":""source"",""path"":""C:\\vt\\rules\\bypass.json""}],""final"":""direct"",""auto_detect_interface"":true,""find_process"":true,""default_domain_resolver"":""local""}}";
         var gs = new Settings { Ip = "192.168.1.1", Port = 1818, DirectPort = 1819, Apps = A(@"C:\a b\chrome.exe", @"C:\Игра\Игра.exe"), DirectApps = A(@"C:\q\qbittorrent.exe") };
-        var gj = ConfigBuilder.Build(gs, 9090, "s");
-        Check(gj == Golden, "SOCKS5: конфиг байт в байт как в 2.1");
+        var gj = ConfigBuilder.Build(gs, 9090, "s", @"C:\vt\rules");
+        Check(gj == Golden, "SOCKS5: конфиг байт в байт (rule-set'ы, 2.3)");
         var gc = JsonNode.Parse(gj)!.AsObject();
-        Check(Obj(Arr(gc["inbounds"])[0])["strict_route"]!.GetValue<bool>() == false && !gj.Contains("vless") && !gj.Contains("rule_set"), "SOCKS5: strict_route false, нет vless и rule_set");
+        Check(Obj(Arr(gc["inbounds"])[0])["strict_route"]!.GetValue<bool>() == false && !gj.Contains("vless") && !gj.Contains("process_name"), "SOCKS5: strict_route false, нет vless и process_name");
 
         const string U = "3f1c0a52-0000-4000-8000-000000000001";
         var reality = $"vless://{U}@nl.example.com:443?security=reality&sni=www.microsoft.com&pbk=PUBKEY&sid=ab12&type=tcp&flow=xtls-rprx-vision";
         var wsLink = $"vless://{U}@1.2.3.4:8443?security=tls&type=ws&host=cdn.example.com&path=%2Fws%3Fed%3D2048&fp=firefox&alpn=h2,http/1.1";
         var grpcLink = $"vless://{U}@nl.example.com:8920?security=reality&sni=www.microsoft.com&pbk=PUBKEY&sid=ab12&type=grpc&serviceName=svc&fp=randomized";
         var srv = IPAddress.Parse("203.0.113.5");
-        var files = new Dictionary<string, string> { ["youtube"] = @"C:\l\youtube.srs", ["russia_inside"] = @"C:\l\russia_inside.srs" };
-        JsonObject V(string link, Dictionary<string, string> f, params string[] apps)
+        var allTags = new[] { "apps", "sites" }.Concat(Catalogs.Lists.Select(l => "list-" + l.Id)).ToArray();
+        var files = new[] { "youtube", "russia_inside" };
+        JsonObject V(string link, string[] lists, params string[] apps)
         {
-            var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Apps = A(apps), Lists = f.Keys.ToList() };
-            return JsonNode.Parse(ConfigBuilder.BuildVless(st, 9090, "t", srv, f))!.AsObject();
+            var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Apps = A(apps), Lists = lists.ToList() };
+            return JsonNode.Parse(ConfigBuilder.BuildVless(st, 9090, "t", srv, RD))!.AsObject();
         }
 
         var c = V(reality, files, @"C:\a\chrome.exe");
@@ -137,13 +201,18 @@ static class Program
             && Str(Obj(tls["reality"])["public_key"]) == "PUBKEY" && Str(Obj(tls["reality"])["short_id"]) == "ab12" && !ob.ContainsKey("transport"), "VLESS: reality tls, utls, без transport");
         Check(Str(Obj(Arr(c["outbounds"])[1])["type"]) == "direct", "VLESS: outbounds[1] direct");
         var rs = Arr(Obj(c["route"])["rule_set"]);
-        Check(rs.Count == 2 && Str(Obj(rs[0])["tag"]) == "russia_inside" && Str(Obj(rs[1])["tag"]) == "youtube"
-            && Str(Obj(rs[0])["type"]) == "local" && Str(Obj(rs[0])["format"]) == "binary" && Str(Obj(rs[1])["path"]) == @"C:\l\youtube.srs", "VLESS: route.rule_set в порядке каталога");
+        Check(rs.Select(x => Str(Obj(x)["tag"])).SequenceEqual(allTags) && rs.All(x => Str(Obj(x)["type"]) == "local")
+            && rs.All(x => Str(Obj(x)["path"]) == RuleFiles.PathOf(RD, Str(Obj(x)["tag"])!))
+            && rs.All(x => Str(Obj(x)["format"]) == (Str(Obj(x)["tag"])!.StartsWith("list-") ? "binary" : "source")),
+            "VLESS: route.rule_set — apps, sites и по списку каталога (binary), пути из PathOf");
         var rules = Arr(Obj(c["route"])["rules"]);
-        int iSniff = IndexOfRule(rules, "action"), iDns = IndexOfRule(rules, "protocol"), iIp = IndexOfRule(rules, "ip_cidr"), iPn = IndexOfRule(rules, "process_name"), iRs = IndexOfRule(rules, "rule_set");
-        Check(iSniff == 0 && iDns == 1 && iIp == 2 && iPn == 3 && iRs == 4, "VLESS: порядок правил sniff, hijack-dns, ip_cidr, process_name, rule_set");
+        int iSniff = IndexOfRule(rules, "action"), iDns = IndexOfRule(rules, "protocol"), iIp = IndexOfRule(rules, "ip_cidr"), iRs = IndexOfRule(rules, "rule_set");
+        Check(iSniff == 0 && iDns == 1 && iIp == 2 && iRs == 3 && rules.Count == 4, "VLESS: порядок правил sniff, hijack-dns, ip_cidr, rule_set");
         Check(Str(Arr(Obj(rules[iIp])["ip_cidr"])[0]) == "203.0.113.5/32" && Str(Obj(rules[iIp])["outbound"]) == "direct"
-            && Str(Obj(rules[iPn])["outbound"]) == "proxy" && Str(Arr(Obj(rules[iRs])["rule_set"])[0]) == "russia_inside" && Str(Obj(rules[iRs])["outbound"]) == "proxy", "VLESS: содержимое правил");
+            && rules.Count(r => Str(Obj(r)["outbound"]) == "proxy") == 1
+            && Arr(Obj(rules[iRs])["rule_set"]).Select(x => Str(x)).SequenceEqual(allTags) && Str(Obj(rules[iRs])["outbound"]) == "proxy",
+            "VLESS: одно правило к proxy по всем rule_set");
+        Check(!c.ToJsonString().Contains("process_name") && Obj(c["route"])["find_process"]!.GetValue<bool>(), "VLESS: find_process true, process_name в конфиге нет");
         var rt = Obj(c["route"]);
         Check(Str(rt["final"]) == "direct" && rt["auto_detect_interface"]!.GetValue<bool>() && Str(rt["default_domain_resolver"]) == "dns", "VLESS: final direct, default_domain_resolver dns");
         Check(Obj(Arr(c["inbounds"])[0])["strict_route"]!.GetValue<bool>(), "VLESS: strict_route true");
@@ -173,14 +242,15 @@ static class Program
             && !Obj(c["dns"]).ToJsonString().Contains("\"type\":\"local\""), "VLESS DNS: один сервер 1.1.1.1 по tcp через proxy, нет local");
         Check(Str(Obj(c["dns"])["strategy"]) == "ipv4_only", "VLESS DNS: только IPv4 (у сервера может не быть IPv6)");
 
-        var onlyLists = Arr(Obj(V(reality, files)["route"])["rules"]);
-        Check(IndexOfRule(onlyLists, "process_name") < 0 && IndexOfRule(onlyLists, "rule_set") >= 0, "VLESS: только списки, нет process_name");
-        var onlyApp = V(reality, new Dictionary<string, string>(), @"C:\a\chrome.exe");
-        Check(IndexOfRule(Arr(Obj(onlyApp["route"])["rules"]), "rule_set") < 0 && !Obj(onlyApp["route"]).ContainsKey("rule_set"), "VLESS: только программа, нет rule_set");
+        // снимки, отличающиеся программами, сайтами и списками, дают тот же конфиг: за них отвечают файлы правил
+        string Cj(Settings st) => ConfigBuilder.BuildVless(st, 9090, "t", srv, RD);
+        var s1 = new Settings { Mode = ProxyMode.Vless, VlessLink = reality, Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "youtube" }, Sites = new List<string> { "example.com" } };
+        var s2 = new Settings { Mode = ProxyMode.Vless, VlessLink = reality, Apps = A(@"C:\a\other.exe", @"C:\b\x.exe"), Lists = new List<string> { "telegram" }, Sites = new List<string> { "1.2.3.4" } };
+        Check(Cj(s1) == Cj(s2), "BuildVless: программы, сайты и списки не влияют на конфиг");
 
         bool threw = false;
-        try { V(reality, new Dictionary<string, string>()); } catch (InvalidOperationException) { threw = true; }
-        Check(threw, "VLESS: нет программ и списков -> исключение");
+        try { V(reality, Array.Empty<string>()); } catch (InvalidOperationException) { threw = true; }
+        Check(threw, "VLESS: нет программ, сайтов и списков -> исключение (Validate)");
 
         var fe = JsonNode.Parse(ConfigBuilder.BuildFetch(reality, srv, 18080))!.AsObject();
         var fin = Obj(Arr(fe["inbounds"])[0]);
@@ -221,15 +291,22 @@ static class Program
             File.WriteAllText(src, "{\"version\":3,\"rules\":[{\"domain_suffix\":[\"example.com\"]}]}");
             Check(Run("rule-set", "compile", "--output", srs, src) == 0 && File.Exists(srs), "sing-box rule-set compile");
             var f = new Dictionary<string, string> { ["russia_inside"] = srs };
+            var rd = Path.Combine(tmp, "rules");
             foreach (var (name, link) in new[] { ("reality", reality.Replace("PUBKEY", "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0")), ("ws", wsLink), ("grpc", grpcLink.Replace("PUBKEY", "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0")) })
             {
-                var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Apps = A(@"C:\a\chrome.exe") };
+                var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "russia_inside" }, Sites = new List<string> { "example.com", "10.0.0.0/8" } };
                 var cfg = Path.Combine(tmp, name + ".json");
-                File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", srv, f));
+                RuleFiles.Write(rd, st, f);
+                File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", srv, rd));
                 Check(Run("check", "-c", cfg) == 0, "sing-box check: " + name);
                 File.WriteAllText(cfg, ConfigBuilder.BuildFetch(link, srv, 18080));
                 Check(Run("check", "-c", cfg) == 0, "sing-box check: fetch " + name);
             }
+            var both = Both();
+            var sc = Path.Combine(tmp, "socks.json");
+            RuleFiles.Write(rd, both, f);
+            File.WriteAllText(sc, ConfigBuilder.Build(both, 9090, "t", rd));
+            Check(Run("check", "-c", sc) == 0, "sing-box check: SOCKS5 с apps и bypass");
         }
         finally { try { Directory.Delete(tmp, true); } catch { } }
     }
@@ -746,7 +823,19 @@ static class Program
             "Sparkline.Levels: отрицательные, NaN и бесконечность -> 0");
     }
 
-    static JsonObject Cfg(Settings s) => JsonNode.Parse(ConfigBuilder.Build(s, 9090, "t"))!.AsObject();
+    const string RD = @"C:\vt\rules"; // в тестах конфига файлы правил не нужны, нужны только пути
+
+    static JsonObject Cfg(Settings s) => JsonNode.Parse(ConfigBuilder.Build(s, 9090, "t", RD))!.AsObject();
+
+    // Папка rules рядом с конфигом сессии
+    static string RulesOf(string cfg) => Path.Combine(Path.GetDirectoryName(cfg)!, "rules");
+
+    // Имена программ из apps.json / bypass.json
+    static List<string> RuleNames(string rulesDir, string tag)
+    {
+        var rules = Arr(JsonNode.Parse(File.ReadAllText(RuleFiles.PathOf(rulesDir, tag)))!["rules"]);
+        return rules.Count == 0 ? new List<string>() : Arr(Obj(rules[0])["process_name"]).Select(x => Str(x)!).ToList();
+    }
 
     static JsonObject Obj(JsonNode? o) => o!.AsObject();
 
@@ -761,8 +850,9 @@ static class Program
         return -1;
     }
 
+    // Правило к выходу outbound по rule_set (apps -> proxy, bypass -> bypass)
     static JsonObject? AppRule(JsonArray rules, string outbound) =>
-        rules.Select(Obj).FirstOrDefault(r => r.ContainsKey("process_name") && Str(r["outbound"]) == outbound);
+        rules.Select(Obj).FirstOrDefault(r => r.ContainsKey("rule_set") && Str(r["outbound"]) == outbound);
 
     static void ConfigTests()
     {
@@ -772,12 +862,23 @@ static class Program
         var rules = Arr(route["rules"]);
 
         Check(Str(route["final"]) == "direct", "route.final = direct");
+        Check(route["find_process"]!.GetValue<bool>(), "SOCKS5: route.find_process = true");
 
-        int pi = IndexOfRule(rules, "process_name");
-        var pr = Obj(rules[pi]);
-        var pn = Arr(pr["process_name"]);
-        Check(pn.Count == 2 && Str(pn[0]) == "chrome.exe" && Str(pn[1]) == "Игра.exe" && Str(pr["outbound"]) == "proxy",
-            "правило process_name -> proxy (кириллица и пробелы в пути)");
+        var pr = AppRule(rules, "proxy")!;
+        int pi = rules.IndexOf(pr);
+        Check(Arr(pr["rule_set"]).Select(x => Str(x)).SequenceEqual(new[] { "apps" }) && !c.ToJsonString().Contains("process_name"),
+            "правило rule_set apps -> proxy, process_name в конфиге нигде нет");
+        var rsd = Arr(route["rule_set"]);
+        Check(rsd.Count == 1 && Str(Obj(rsd[0])["tag"]) == "apps" && Str(Obj(rsd[0])["type"]) == "local" && Str(Obj(rsd[0])["format"]) == "source"
+            && Str(Obj(rsd[0])["path"]) == RuleFiles.PathOf(RD, "apps"), "rule_set apps: local, source, путь из PathOf");
+
+        var rdir = Path.Combine(Path.GetTempPath(), "vivitune-rules-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            RuleFiles.Write(rdir, s, new Dictionary<string, string>());
+            Check(RuleNames(rdir, "apps").SequenceEqual(new[] { "chrome.exe", "Игра.exe" }), "apps.json: кириллица и пробелы в пути");
+        }
+        finally { try { Directory.Delete(rdir, true); } catch { } }
 
         int xi = IndexOfRule(rules, "ip_cidr");
         var xr = Obj(rules[xi]);
@@ -787,7 +888,7 @@ static class Program
         Check(IndexOfRule(rules, "protocol") >= 0, "есть hijack-dns");
 
         var dr = Obj(Arr(Obj(c["dns"])["rules"])[0]);
-        Check(Str(dr["server"]) == "proxy-dns" && Arr(dr["process_name"]).Count == 2, "DNS выбранных приложений идёт через proxy-dns");
+        Check(Str(dr["server"]) == "proxy-dns" && Arr(dr["rule_set"]).Select(x => Str(x)).SequenceEqual(new[] { "apps" }), "DNS выбранных приложений идёт через proxy-dns");
 
         bool socksOk = false;
         foreach (var o in Arr(c["outbounds"]))
@@ -801,15 +902,15 @@ static class Program
         var v6rules = Arr(Obj(v6["route"])["rules"]);
         Check(Str(Arr(Obj(v6rules[IndexOfRule(v6rules, "ip_cidr")])["ip_cidr"])[0]) == "::1/128", "IPv6-прокси исключается как /128");
 
-        var ca = Obj(Obj(JsonNode.Parse(ConfigBuilder.Build(s, 51234, "abc"))!["experimental"])["clash_api"]);
+        var ca = Obj(Obj(JsonNode.Parse(ConfigBuilder.Build(s, 51234, "abc", RD))!["experimental"])["clash_api"]);
         Check(Str(ca["external_controller"]) == "127.0.0.1:51234" && Str(ca["secret"]) == "abc", "clash_api с переданными портом и секретом");
 
         bool threw = false;
-        try { ConfigBuilder.Build(new Settings(), 9090, "t"); } catch (InvalidOperationException) { threw = true; }
+        try { ConfigBuilder.Build(new Settings(), 9090, "t", RD); } catch (InvalidOperationException) { threw = true; }
         Check(threw, "Build: пустой список приложений -> исключение (иначе правило без условий матчит всё)");
         var two = new Settings { Ip = "192.168.1.1", Port = 1818, DirectPort = 1819,
-            Apps = A(@"C:\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe", @"D:\CHROME.EXE") };
-        JsonObject B(Exits? live) => JsonNode.Parse(ConfigBuilder.Build(two, 9090, "t", live))!.AsObject();
+            Apps = A(@"C:\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe", @"D:\CHROME.EXE") };
+        JsonObject B(Exits? live) => JsonNode.Parse(ConfigBuilder.Build(two, 9090, "t", RD, live))!.AsObject();
         JsonArray R(JsonObject c2) => Arr(Obj(c2["route"])["rules"]);
         bool HasOut(JsonObject c2, string tag) => Arr(c2["outbounds"]).Any(o => Str(Obj(o)["tag"]) == tag);
 
@@ -817,9 +918,18 @@ static class Program
         var bo = Arr(all["outbounds"]).Select(Obj).First(o => Str(o["tag"]) == "bypass");
         Check(Str(bo["type"]) == "socks" && Str(bo["server"]) == "192.168.1.1" && (int)bo["server_port"]! == 1819 && Str(bo["version"]) == "5",
             "bypass: socks outbound на IP роутера и порт «Мимо Podkop»");
-        Check(Arr(AppRule(R(all), "bypass")!["process_name"]).Select(x => Str(x)).SequenceEqual(new[] { "qbittorrent.exe" })
-            && Arr(AppRule(R(all), "proxy")!["process_name"]).Select(x => Str(x)).SequenceEqual(new[] { "chrome.exe" }),
-            "bypass: правила по спискам, имя из обоих списков только в proxy");
+        Check(Arr(AppRule(R(all), "bypass")!["rule_set"]).Select(x => Str(x)).SequenceEqual(new[] { "bypass" })
+            && Arr(AppRule(R(all), "proxy")!["rule_set"]).Select(x => Str(x)).SequenceEqual(new[] { "apps" })
+            && Arr(Obj(all["route"])["rule_set"]).Select(x => Str(Obj(x)["tag"])).SequenceEqual(new[] { "apps", "bypass" }),
+            "bypass: правила по rule_set apps и bypass");
+        var bdir = Path.Combine(Path.GetTempPath(), "vivitune-rules-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            RuleFiles.Write(bdir, two, new Dictionary<string, string>());
+            Check(RuleNames(bdir, "bypass").SequenceEqual(new[] { "qbittorrent.exe" }) && RuleNames(bdir, "apps").SequenceEqual(new[] { "chrome.exe" }),
+                "bypass: имя из обоих списков только в apps");
+        }
+        finally { try { Directory.Delete(bdir, true); } catch { } }
         Check(IndexOfRule(R(all), "ip_cidr") < R(all).IndexOf(AppRule(R(all), "bypass")), "bypass: адрес роутера напрямую раньше правил приложений");
 
         var px = B(new Exits(true, false));
@@ -828,20 +938,25 @@ static class Program
 
         var bp = B(new Exits(false, true));
         Check(AppRule(R(bp), "proxy") == null && AppRule(R(bp), "bypass") != null && Arr(Obj(bp["dns"])["rules"]).Count == 0,
-            "жив только bypass: нет правила proxy и DNS-правила proxy-dns");
+            "жив только bypass: нет правила apps -> proxy и DNS-правила proxy-dns");
         Check(HasOut(bp, "proxy"), "жив только bypass: outbound proxy остаётся (на него ссылается detour proxy-dns)");
 
         var onlyDirect = new Settings { Port = 1818, DirectPort = 1819, DirectApps = A(@"C:\q\qbittorrent.exe") };
-        var od = JsonNode.Parse(ConfigBuilder.Build(onlyDirect, 9090, "t"))!.AsObject();
+        var od = JsonNode.Parse(ConfigBuilder.Build(onlyDirect, 9090, "t", RD))!.AsObject();
         Check(AppRule(R(od), "proxy") == null && Arr(Obj(od["dns"])["rules"]).Count == 0 && AppRule(R(od), "bypass") != null,
-            "нет программ «Через прокси»: нет правил с пустым process_name");
+            "нет программ «Через прокси»: нет правила к proxy");
 
-        var noPort = new Settings { Port = 1818, Apps = A(@"C:\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe") };
-        Check(!HasOut(JsonNode.Parse(ConfigBuilder.Build(noPort, 9090, "t"))!.AsObject(), "bypass"), "DirectPort не задан: bypass нет");
+        var noPort = new Settings { Port = 1818, Apps = A(@"C:\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe") };
+        Check(!HasOut(JsonNode.Parse(ConfigBuilder.Build(noPort, 9090, "t", RD))!.AsObject(), "bypass"), "DirectPort не задан: bypass нет");
 
         bool none = false;
-        try { ConfigBuilder.Build(two, 9090, "t", new Exits(false, false)); } catch (InvalidOperationException) { none = true; }
+        try { ConfigBuilder.Build(two, 9090, "t", RD, new Exits(false, false)); } catch (InvalidOperationException) { none = true; }
         Check(none, "Build: ни одного живого выхода с программами -> исключение");
+
+        // снимки, отличающиеся только программами, дают тот же конфиг: за программы отвечают файлы правил
+        var two2 = new Settings { Ip = "192.168.1.1", Port = 1818, DirectPort = 1819,
+            Apps = A(@"C:\chrome.exe", @"C:\x\Discord.exe"), DirectApps = A(@"C:\q\other.exe") };
+        Check(ConfigBuilder.Build(two, 9090, "t", RD) == ConfigBuilder.Build(two2, 9090, "t", RD), "Build: программы в непустых списках не влияют на конфиг");
     }
 
     // Фейковый SOCKS5-сервер: на каждое соединение отвечает заданными байтами.
@@ -1053,12 +1168,9 @@ static class Program
 
     static ListsResult NoFiles(params string[] failed) => new(new Dictionary<string, string>(), failed, Array.Empty<string>());
 
-    // Теги route.rule_set конфига (пусто, если их нет).
-    static List<string> CfgLists(string path)
-    {
-        var rs = Obj(JsonNode.Parse(File.ReadAllText(path))!["route"])["rule_set"];
-        return rs == null ? new List<string>() : Arr(rs).Select(x => Str(Obj(x)["tag"])!).ToList();
-    }
+    // Id списков каталога, у которых в rules\ рядом с конфигом не пустой SRS.
+    static List<string> CfgLists(string path) => Catalogs.Lists.Select(l => l.Id)
+        .Where(id => !File.ReadAllBytes(RuleFiles.PathOf(RulesOf(path), RuleFiles.ListTag(id))).SequenceEqual(RuleFiles.EmptySrs)).ToList();
 
     static void EvaluateTests()
     {
@@ -1108,11 +1220,7 @@ static class Program
             "EvaluateVless: без программ хватает одного загруженного списка");
     }
 
-    static List<string> CfgApps(string path)
-    {
-        var rules = Arr(Obj(JsonNode.Parse(File.ReadAllText(path))!["route"])["rules"]);
-        return Arr(Obj(rules[IndexOfRule(rules, "process_name")])["process_name"]).Select(x => Str(x)!).ToList();
-    }
+    static List<string> CfgApps(string path) => RuleNames(RulesOf(path), RuleFiles.Apps);
 
     static void SessionTests()
     {
@@ -1371,7 +1479,7 @@ static class Program
                 Thread.Sleep(300);
                 var rules = Arr(Obj(JsonNode.Parse(File.ReadAllText(cfg))!["route"])["rules"]);
                 Check(fb.Starts == 2 && AppRule(rules, "proxy") == null
-                    && Arr(AppRule(rules, "bypass")!["process_name"]).Select(x => Str(x)).OrderBy(x => x).SequenceEqual(new[] { "chrome.exe", "qbittorrent.exe" }),
+                    && RuleNames(RulesOf(cfg), RuleFiles.Bypass).OrderBy(x => x).SequenceEqual(new[] { "chrome.exe", "qbittorrent.exe" }),
                     "Session: перенос программы в другой список во время работы -> перезапуск, она только в новом правиле");
             }
             {

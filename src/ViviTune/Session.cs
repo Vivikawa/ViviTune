@@ -64,6 +64,7 @@ public sealed class Session : IDisposable
     readonly Settings settings;
     readonly ISingBox sb;
     readonly string configPath;
+    readonly string rulesDir;
     readonly Func<string, int, ProbeResult> probe;
     readonly TimeSpan restartDelay;
     readonly VlessDeps? vless; // null — режим VLESS недоступен
@@ -103,6 +104,7 @@ public sealed class Session : IDisposable
         this.settings = settings;
         sb = singBox;
         this.configPath = configPath;
+        rulesDir = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(configPath))!, "rules");
         this.probe = probe;
         this.restartDelay = restartDelay;
         this.vless = vless;
@@ -437,9 +439,10 @@ public sealed class Session : IDisposable
     {
         int port = FreePort();
         var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+        RuleFiles.Write(rulesDir, snap, v.Vless?.ListFiles ?? new Dictionary<string, string>());
         File.WriteAllText(configPath, v.Vless is { } p
-            ? ConfigBuilder.BuildVless(snap, port, secret, p.Server, p.ListFiles)
-            : ConfigBuilder.Build(snap, port, secret, v.Live));
+            ? ConfigBuilder.BuildVless(snap, port, secret, p.Server, rulesDir)
+            : ConfigBuilder.Build(snap, port, secret, rulesDir, v.Live));
         sb.Start(configPath);
         if (v.Vless != null && vless!.AfterStart(port, secret, ct) is { } err)
             throw new CheckFailedException(err);
