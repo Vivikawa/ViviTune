@@ -33,8 +33,8 @@ namespace ViviTune
                 try
                 {
                     var data = download(id);
-                    // магия SRS и версия формата: sing-box 1.12.12 читает до 3
-                    if (data.Length < 4 || !data.AsSpan(0, 3).SequenceEqual("SRS"u8) || data[3] > 3) throw new InvalidDataException("не SRS 1–3");
+                    // магия SRS и версия формата: sing-box 1.14 читает до 5
+                    if (data.Length < 4 || !data.AsSpan(0, 3).SequenceEqual("SRS"u8) || data[3] > 5) throw new InvalidDataException("не SRS 1–5");
                     var tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
                     try
                     {

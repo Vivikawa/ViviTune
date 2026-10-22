@@ -42,7 +42,7 @@ namespace ViviTune
                 case "tcp": case "raw": transport = "tcp"; break;
                 case "ws": case "grpc": case "httpupgrade": case "http": transport = type; break;
                 case "h2": transport = "http"; break;
-                case "xhttp": case "splithttp": error = "XHTTP не поддерживается: sing-box 1.12 его не умеет"; return null;
+                case "xhttp": case "splithttp": error = "XHTTP пока не поддерживается"; return null;
                 default: error = "Неизвестный тип транспорта: " + type; return null;
             }
 

@@ -9,7 +9,7 @@ namespace ViviTune.Ui
         public SettingsPage()
         {
             InitializeComponent();
-            VersionText.Text = $"ViviTune {typeof(SettingsPage).Assembly.GetName().Version?.ToString(3)} · sing-box 1.12.12";
+            VersionText.Text = $"ViviTune {typeof(SettingsPage).Assembly.GetName().Version?.ToString(3)} · sing-box 1.14.3 (podkop-engine)";
             IpBox.TextChanged += (_, _) => Push();
             PortBox.TextChanged += (_, _) => Push();
             DirectPortBox.TextChanged += (_, _) => Push();

@@ -89,12 +89,12 @@ static class Program
                       r2.Failed.Contains("hn") && !File.Exists(P("hn")), "ListStore: не SRS отвергается");
             }
             {
-                var newer = new byte[] { 0x53, 0x52, 0x53, 4, 1 };
+                var newer = new byte[] { 0x53, 0x52, 0x53, 6, 1 };
                 Seed("vs", true);
                 var r1 = ListStore.Prepare(dir, new[] { "vs" }, id => newer, now);
                 var r2 = ListStore.Prepare(dir, new[] { "vn" }, id => newer, now);
                 Check(r1.Stale.Contains("vs") && File.ReadAllBytes(P("vs")).SequenceEqual(old) &&
-                      r2.Failed.Contains("vn") && !File.Exists(P("vn")), "ListStore: версия SRS новее 3 отвергается");
+                      r2.Failed.Contains("vn") && !File.Exists(P("vn")), "ListStore: версия SRS новее 5 отвергается");
             }
             {
                 var r = ListStore.Prepare(dir, new[] { "a", "b", "c" }, id => good, now);
@@ -189,7 +189,7 @@ static class Program
         SingBoxCheck(reality, wsLink, grpcLink, srv);
     }
 
-    // Реальный sing-box check: конфиги из BuildVless принимаются 1.12.12
+    // Реальный sing-box check: конфиги из BuildVless принимаются движком из third_party
     static void SingBoxCheck(string reality, string wsLink, string grpcLink, IPAddress srv)
     {
         var exe = Path.Combine(AppContext.BaseDirectory, "sing-box.exe");
@@ -314,7 +314,7 @@ static class Program
         Err("https://x", "Ссылка должна начинаться с vless://", "схема");
         Err("vless://@h:443", "В ссылке нет UUID", "нет UUID");
         Err($"vless://{U}@h.example.com?security=tls", "В ссылке нет порта сервера", "нет порта");
-        Err($"vless://{U}@h.example.com:443?type=xhttp", "XHTTP не поддерживается: sing-box 1.12 его не умеет", "xhttp");
+        Err($"vless://{U}@h.example.com:443?type=xhttp", "XHTTP пока не поддерживается", "xhttp");
         Err($"vless://{U}@h.example.com:443?type=kcp", "Неизвестный тип транспорта: kcp", "kcp");
         Err($"vless://{U}@h.example.com:443?security=reality", "Для Reality в ссылке нужен pbk", "reality без pbk");
         Err($"vless://{U}@h.example.com:443?flow=xtls-rprx-direct", "Неизвестный flow: xtls-rprx-direct", "flow");

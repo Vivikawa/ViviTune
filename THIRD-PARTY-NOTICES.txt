@@ -3,9 +3,10 @@ ViviTune: сторонние компоненты / Third-party notices
 ViviTune распространяется под GNU GPL v3 (полный текст: LICENSE.txt).
 В сборку входят следующие сторонние компоненты:
 
-  sing-box 1.12.12 (sing-box.exe, отдельная программа)  GPL-3.0-or-later
-      Исходный код этой версии: https://github.com/SagerNet/sing-box/tree/v1.12.12
-      ViviTune не связан с проектом sing-box и не одобрен его авторами.
+  sing-box 1.14.3-pdk-1d47804 (sing-box.exe, отдельная программа)  GPL-3.0-or-later
+      podkop-engine, форк sing-box от podkop-net.
+      Исходный код этой версии: https://github.com/podkop-net/sing-box/tree/1d47804dc7831d963936122e071573bd6619cd8b
+      ViviTune не связан с проектами sing-box и Podkop и не одобрен их авторами.
   .NET 10 runtime                                       MIT
   Avalonia 12.1.4                                       MIT
   MicroCom.Runtime                                      MIT
