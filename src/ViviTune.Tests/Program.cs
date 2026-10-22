@@ -96,6 +96,23 @@ static class Program
             try { RuleFiles.Write(d3, ls, lf); } catch (Exception e) { ex = e; }
             holder.Wait(2000);
             Check(ex == null && File.ReadAllBytes(P(d3, "list-youtube")).SequenceEqual(ytBytes), "RuleFiles: файл занят на 300 мс -> запись дождалась, без исключения");
+
+            // sing-box читает с общим доступом на чтение: чтение для сравнения проходит, повторять должен File.Move
+            ls.Lists.Clear();
+            RuleFiles.Write(d3, ls, lf);
+            ls.Lists.Add("youtube");
+            held.Reset();
+            holder = Task.Run(() =>
+            {
+                using var fs = new FileStream(P(d3, "list-youtube"), FileMode.Open, FileAccess.Read, FileShare.Read);
+                held.Set();
+                Thread.Sleep(300);
+            });
+            held.Wait(2000);
+            ex = null;
+            try { RuleFiles.Write(d3, ls, lf); } catch (Exception e) { ex = e; }
+            holder.Wait(2000);
+            Check(ex == null && File.ReadAllBytes(P(d3, "list-youtube")).SequenceEqual(ytBytes), "RuleFiles: файл открыт на чтение 300 мс -> замена дождалась, без исключения");
             Check(Directory.GetFiles(d3, "*.tmp").Length == 0 && Directory.GetFiles(d1, "*.tmp").Length == 0, "RuleFiles: временных файлов не осталось");
         }
         finally { try { Directory.Delete(root, true); } catch { } }
@@ -1368,6 +1385,28 @@ static class Program
                 var fb = new FakeSingBox();
                 var s = Both();
                 using var ss = new Session(s, fb, NewCfg(), Up, Delay);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                s.DirectApps[0].Enabled = false;
+                ss.AppsChanged();
+                bool restarting = ss.State == ConnState.Restarting;
+                s.DirectApps[0].Enabled = true; // вернули и добавили программу, пока ждали перезапуска
+                s.Apps.AddRange(A(@"C:\a\other.exe"));
+                ss.AppsChanged();
+                Thread.Sleep(300);
+                lock (logs)
+                {
+                    int i = logs.IndexOf("Правила обновлены без перезапуска");
+                    Check(restarting && ss.State == ConnState.Connected && fb.Starts == 1 && fb.Stops == 0
+                          && i >= 0 && i + 1 < logs.Count && logs[i + 1] == "Перезапустите выбранные приложения: уже открытые соединения остаются прямыми.",
+                        "Session: правила обновлены в ожидании перезапуска, новое приложение -> подсказка про перезапуск программ");
+                }
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Both();
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay);
                 ss.ConnectAsync().Wait(2000);
                 s.DirectApps[0].Enabled = false;
                 ss.AppsChanged();
@@ -1685,6 +1724,21 @@ static class Program
                 ss.ConnectAsync().Wait(2000);
                 Check(ss.State == ConnState.Connected && fb.Starts == 1 && ss.Warnings.SequenceEqual(new[] { "Список YouTube не загрузился" }) && CfgLists(cfg).Count == 0,
                     "Session VLESS: список не загрузился при программе -> подключено с предупреждением");
+            }
+            {
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                var fv = new FakeVless(root, lists: ids => NoFiles("youtube"));
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
+                var logs = new List<string>();
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                int before = fv.Prepares;
+                s.Apps.AddRange(A(@"C:\a\other.exe"));
+                ss.AppsChanged();
+                lock (logs)
+                    Check(before == 1 && fv.Prepares == 1 && logs.Count(l => l == "ВНИМАНИЕ: Список YouTube не загрузился") == 1 && logs.Contains("Правила обновлены без перезапуска"),
+                        "Session VLESS: не загрузившийся список не качается заново при других изменениях");
             }
             {
                 var fb = new FakeSingBox();

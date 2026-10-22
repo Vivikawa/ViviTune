@@ -335,7 +335,7 @@ public sealed class Session : IDisposable
     // Файлы пишутся под ops, но не под gate (занятый файл — повторы до ~1 с, State читает UI).
     bool KeepRunning(int t)
     {
-        bool rewritten = false;
+        bool rewritten = false, reopen = false;
         lock (ops)
         {
             Settings snap;
@@ -357,13 +357,15 @@ public sealed class Session : IDisposable
                 lock (gate)
                 {
                     if (t != ticket || state != ConnState.Restarting) return false; // файлы записаны, applied не трогаем
+                    var old = applied!.ProcessNames();
+                    reopen = snap.ProcessNames().Any(n => !old.Contains(n, StringComparer.OrdinalIgnoreCase));
                     applied = snap;
                     state = ConnState.Connected;
                     epoch++;
                 }
             }
         }
-        Raise(false, rewritten ? HotMsg : null);
+        Raise(false, rewritten ? HotMsg : null, reopen ? ReopenMsg : null);
         OnExited(); // sing-box мог упасть, пока мы были в Restarting
         return true;
     }
@@ -390,13 +392,16 @@ public sealed class Session : IDisposable
             }
             if (SameRules(snap, prev)) break; // сошлись
             // Копии новых списков качаем вне блокировок; уже имеющиеся (и у выключенных) используем снова.
+            // Не загрузившийся при подключении или раньше заново не качаем: только включённые с прошлого применения.
             VlessPrep? newPrep = null;
             if (snap.Mode == ProxyMode.Vless && p != null && vless != null)
             {
-                var missing = snap.Lists.Where(id => !p.ListFiles.ContainsKey(id)).ToList();
+                var missing = snap.Lists.Where(id => !prev.Lists.Contains(id) && !p.ListFiles.ContainsKey(id)).ToList();
                 if (missing.Count > 0)
                 {
                     ListsResult r;
+                    // ponytail: два PrepareLists могут редко идти параллельно (Disconnect+Connect во время скачивания, HotApply из Connect и из очереди):
+                    // два временных sing-box разом идут на VLESS-сервер. Потолок принят; если мешает — один полёт вокруг PrepareLists.
                     try { r = vless.PrepareLists(missing, snap.VlessLink, p.Server); }
                     catch { r = new ListsResult(new Dictionary<string, string>(), missing, []); } // ни один не скачался
                     foreach (var id in r.Stale) Log?.Invoke($"Список {ListName(id)} не обновился, работаю со старой копией");
