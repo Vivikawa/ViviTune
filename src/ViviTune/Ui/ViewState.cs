@@ -34,6 +34,7 @@ public sealed class ViewState : INotifyPropertyChanged
     public event Action<ProxyMode>? SetModeRequested;
     public event Action<string>? SetVlessRequested; // ссылка
     public event Action<string, bool>? SetListEnabledRequested; // id списка
+    public event Action<string>? AddSiteRequested, RemoveSiteRequested; // нормализованная запись
 
     public ViewState()
     {
@@ -138,6 +139,30 @@ public sealed class ViewState : INotifyPropertyChanged
         else { VlessHost = ""; VlessSummary = error ?? "Ссылка не разбирается"; VlessLinkError = true; }
     }
 
+    public ObservableCollection<SiteRow> Sites { get; } = new();
+    public string? SiteError { get => siteError; private set => Set(ref siteError, value); }
+    string? siteError;
+
+    // Строки «Своих сайтов» по Settings.Sites
+    public void SyncSites(IReadOnlyList<string> sites)
+    {
+        Sites.Clear();
+        foreach (var s in sites) Sites.Add(new SiteRow(s, SiteEntry.Display(s)));
+        Notify(nameof(DirectTabText));
+    }
+
+    // true — запись принята (страница очищает ввод); пустой ввод — не ошибка
+    public bool RequestAddSite(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var entry = SiteEntry.Parse(text, out var error);
+        if (entry == null) { SiteError = error; return false; }
+        SiteError = null;
+        AddSiteRequested?.Invoke(entry);
+        return true;
+    }
+    public void RequestRemoveSite(string value) => RemoveSiteRequested?.Invoke(value);
+
     // Строки списков по включённым id из Settings: Enabled, и Covered у тех, что уже входят в Russia inside
     public void SyncLists(IReadOnlyList<string> enabled)
     {
@@ -152,7 +177,7 @@ public sealed class ViewState : INotifyPropertyChanged
     public ObservableCollection<AppRow> ShownApps => directTab ? DirectApps : Apps;
     public string ProxyTabText => IsVless ? $"Приложения · {Apps.Count(a => a.Enabled)}" : $"Через прокси · {Apps.Count(a => a.Enabled)}";
     public string DirectTabText => IsVless
-        ? $"Сайты · {ListGroups.Sum(g => g.Rows.Count(r => r.Enabled))}"
+        ? $"Сайты · {ListGroups.Sum(g => g.Rows.Count(r => r.Enabled)) + Sites.Count}"
         : $"Мимо Podkop · {DirectApps.Count(a => a.Enabled)}";
     public string EmptyText => IsVless ? "Добавьте приложение, трафик которого пойдёт через VPN"
         : directTab
@@ -256,12 +281,13 @@ public sealed class ViewState : INotifyPropertyChanged
         return time + u + p + d;
     }
 
-    // Строка под статусом в VLESS: «00:12:03 · 2 приложения · 3 списка»; нулевые части не пишутся.
-    public static string DetailVless(TimeSpan up, int apps, int lists)
+    // Строка под статусом в VLESS: «00:12:03 · 2 приложения · 3 списка · 1 сайт»; нулевые части не пишутся.
+    public static string DetailVless(TimeSpan up, int apps, int lists, int sites)
     {
         var s = Format.Uptime(up < TimeSpan.Zero ? TimeSpan.Zero : up);
         if (apps > 0) s += " · " + Format.Plural(apps, "приложение", "приложения", "приложений");
         if (lists > 0) s += " · " + Format.Plural(lists, "список", "списка", "списков");
+        if (sites > 0) s += " · " + Format.Plural(sites, "сайт", "сайта", "сайтов");
         return s;
     }
 
@@ -361,6 +387,8 @@ public sealed class AppRow : INotifyPropertyChanged
         return true;
     }
 }
+
+public sealed record SiteRow(string Value, string Display);
 
 public sealed record ListGroup(string Title, IReadOnlyList<ListRow> Rows);
 

@@ -656,9 +656,9 @@ static class Program
         v.SetVless("http://x");
         Check(v.VlessHost == "" && v.VlessSummary == "Ссылка должна начинаться с vless://" && v.VlessLinkError, "ViewState.SetVless: битая ссылка");
 
-        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 2, 3) == "00:12:03 · 2 приложения · 3 списка", "DetailVless: всё");
-        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 1, 0) == "00:12:03 · 1 приложение", "DetailVless: без списков");
-        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 0, 5) == "00:12:03 · 5 списков", "DetailVless: без приложений");
+        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 2, 3, 1) == "00:12:03 · 2 приложения · 3 списка · 1 сайт", "DetailVless: всё");
+        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 1, 0, 0) == "00:12:03 · 1 приложение", "DetailVless: без списков");
+        Check(ViewState.DetailVless(new TimeSpan(0, 12, 3), 0, 5, 0) == "00:12:03 · 5 списков", "DetailVless: без приложений");
 
         var forms = new (int, string)[] { (1, "1 приложение"), (2, "2 приложения"), (5, "5 приложений"), (11, "11 приложений"), (12, "12 приложений"), (21, "21 приложение"), (22, "22 приложения"), (25, "25 приложений"), (111, "111 приложений"), (112, "112 приложений") };
         Check(forms.All(f => Format.Plural(f.Item1, "приложение", "приложения", "приложений") == f.Item2), "Format.Plural: русские формы");
@@ -685,6 +685,25 @@ static class Program
         Check(rowChanged.Contains("Covered") && rowChanged.Contains("Shown") && rowChanged.Contains("Note"), "ViewState.SyncLists: строка уведомляет");
         l.Mode = ProxyMode.Vless;
         Check(l.DirectTabText == "Сайты · 1", "ViewState.SyncLists: счётчик на вкладке");
+        var sv = new ViewState { Mode = ProxyMode.Vless };
+        var added = new List<string>();
+        sv.AddSiteRequested += a => added.Add(a);
+        bool okAdd = sv.RequestAddSite("https://Example.com/x");
+        Check(okAdd && added.SequenceEqual(new[] { "example.com" }) && sv.SiteError == null, "ViewState.RequestAddSite: нормализует и шлёт событие");
+        bool badAdd = sv.RequestAddSite("localhost");
+        Check(!badAdd && added.Count == 1 && sv.SiteError == "Введите адрес целиком, например example.com", "ViewState.RequestAddSite: ошибка разбора");
+        sv.RequestAddSite("example.org");
+        Check(sv.SiteError == null && added.Count == 2, "ViewState.RequestAddSite: удачный сбрасывает ошибку");
+        bool blank = sv.RequestAddSite("   ");
+        Check(!blank && sv.SiteError == null && added.Count == 2, "ViewState.RequestAddSite: пустой ввод");
+        string? removed = null;
+        sv.RemoveSiteRequested += x => removed = x;
+        sv.RequestRemoveSite("example.com");
+        Check(removed == "example.com", "ViewState.RequestRemoveSite: событие");
+        sv.SyncSites(new[] { "xn--80aswg.xn--p1ai" });
+        Check(sv.Sites.Count == 1 && sv.Sites[0].Display == "сайт.рф" && sv.Sites[0].Value == "xn--80aswg.xn--p1ai", "ViewState.SyncSites: Display в Unicode");
+        sv.SyncLists(new[] { "youtube" });
+        Check(sv.DirectTabText == "Сайты · 2", "ViewState: счётчик вкладки = списки + сайты");
         int lev = 0;
         l.SetListEnabledRequested += (_, _) => lev++;
         l.RequestSetListEnabled("youtube", false);

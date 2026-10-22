@@ -56,6 +56,7 @@ namespace ViviTune.Ui
 
             state.SetVless(settings.VlessLink);
             state.SyncLists(settings.Lists);
+            state.SyncSites(settings.Sites);
 
             // Новые строки (с именем файла и плашкой) получают описание программы и иконку, не в UI-потоке.
             // Файла нет — так и остаётся (имя из имени файла, плашка с буквой).
@@ -108,6 +109,16 @@ namespace ViviTune.Ui
                 state.SyncLists(settings.Lists);
                 QueueAppsChanged();
             };
+            // Settings.Sites тоже заменяется целиком; повтор молча игнорируется
+            void ChangeSites(List<string> sites)
+            {
+                settings.Sites = sites;
+                Save();
+                state.SyncSites(sites);
+                QueueAppsChanged();
+            }
+            state.AddSiteRequested += v => { if (!settings.Sites.Contains(v)) ChangeSites([.. settings.Sites, v]); };
+            state.RemoveSiteRequested += v => { if (settings.Sites.Contains(v)) ChangeSites(settings.Sites.Where(x => x != v).ToList()); };
             state.AddAppRequested += (path, toDirect) => ChangeApps((p, d) => toDirect ? AppListOps.Move(d, p, path) : AppListOps.Move(p, d, path));
             // Путь может быть в любом из списков: без короткого замыкания (| вместо ||), чтобы затронуть оба
             state.RemoveAppRequested += path => ChangeApps((p, d) => AppListOps.Remove(p, path) | AppListOps.Remove(d, path));
@@ -126,7 +137,7 @@ namespace ViviTune.Ui
                 var live = session.Live;
                 state.DetailText = state.State != ConnState.Connected || since == null ? ""
                     : state.IsVless
-                    ? ViewState.DetailVless(DateTime.Now - since.Value, state.Apps.Count(a => a.Enabled), settings.Lists.Count)
+                    ? ViewState.DetailVless(DateTime.Now - since.Value, state.Apps.Count(a => a.Enabled), settings.Lists.Count, settings.Sites.Count)
                     : ViewState.Detail(DateTime.Now - since.Value, session.UdpOk,
                         live.Proxy ? state.Apps.Count(a => a.Enabled) : 0, live.Bypass ? state.DirectApps.Count(a => a.Enabled) : 0);
             }

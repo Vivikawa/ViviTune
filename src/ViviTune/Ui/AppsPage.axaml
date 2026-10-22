@@ -83,7 +83,34 @@
         <!-- VLESS, вкладка «Сайты»: списки ITDog вместо программ -->
         <StackPanel Spacing="8" IsVisible="{Binding SitesTab}">
           <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap"
-                     Text="Списки ITDog. Работают для всех программ на компьютере." />
+                     Text="Свои сайты и списки ITDog. Работают для всех программ на компьютере." />
+          <StackPanel Spacing="6">
+            <TextBlock Classes="lab" Text="Свои сайты" Margin="2,6,0,0" />
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBox Name="SiteInput" PlaceholderText="Домен или IP, например example.com" FontSize="13" />
+              <Button Name="SiteAddButton" Grid.Column="1" Classes="primary" Content="Добавить" Margin="8,0,0,0" />
+            </Grid>
+            <TextBlock Classes="warning" FontSize="13" TextWrapping="Wrap" Text="{Binding SiteError}"
+                       IsVisible="{Binding SiteError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            <ItemsControl ItemsSource="{Binding Sites}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Spacing="6" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="ui:SiteRow">
+                  <Border Classes="card" Padding="12,9">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="{Binding Display}" FontSize="14" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                      <Button Grid.Column="1" Classes="flat" Content="✕" Margin="10,0,0,0" VerticalAlignment="Center"
+                              Click="OnRemoveSite" AutomationProperties.Name="Убрать из списка" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
           <ItemsControl ItemsSource="{Binding ListGroups}">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>

@@ -26,6 +26,8 @@ namespace ViviTune.Ui
             AddPopup.PlacementTarget = ListArea;
             AddPopup.Opened += (_, _) => SearchBox.Focus();
             AddButton.Click += (_, _) => OpenAddPanel();
+            SiteAddButton.Click += (_, _) => AddSite();
+            SiteInput.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) AddSite(); };
             PickFileButton.Click += (_, _) => PickFile();
             SearchBox.TextChanged += (_, _) =>
             {
@@ -143,6 +145,16 @@ namespace ViviTune.Ui
         void OnRemove(object? sender, RoutedEventArgs e)
         {
             if (sender is Control { DataContext: AppRow r } && removeGuard.TryAccept(Environment.TickCount64)) State?.RequestRemoveApp(r.Path);
+        }
+
+        void AddSite()
+        {
+            if (State?.RequestAddSite(SiteInput.Text ?? "") == true) SiteInput.Text = "";
+        }
+
+        void OnRemoveSite(object? sender, RoutedEventArgs e)
+        {
+            if (sender is Control { DataContext: SiteRow r } && removeGuard.TryAccept(Environment.TickCount64)) State?.RequestRemoveSite(r.Value);
         }
 
         async void PickFile()
