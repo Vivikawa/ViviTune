@@ -28,6 +28,8 @@ static class Program
         AppListTests();
         VlessLinkTests();
         SettingsV4Tests();
+        SiteEntryTests();
+        SettingsV5Tests();
         CatalogsTests();
         VlessConfigTests();
         ListStoreTests();
@@ -254,13 +256,56 @@ static class Program
         File.Delete(p);
 
         Check(new Settings { Mode = ProxyMode.Vless }.Validate() == "Вставьте VLESS-ссылку в настройках", "Validate Vless: пустая ссылка");
-        Check(new Settings { Mode = ProxyMode.Vless, VlessLink = Link }.Validate() == "Добавьте приложение или включите список сайтов", "Validate Vless: нет программ и списков");
+        Check(new Settings { Mode = ProxyMode.Vless, VlessLink = Link }.Validate() == "Добавьте приложение или сайт либо включите список", "Validate Vless: нет программ и списков");
         Check(new Settings { Mode = ProxyMode.Vless, VlessLink = Link, Lists = new List<string> { "youtube" } }.Validate() == null, "Validate Vless: только список");
         Check(new Settings { VlessLink = "мусор", Apps = A(@"C:\a\x.exe") }.Validate() == null, "Validate Socks5: ссылку не смотрит");
 
         var c = s.Clone();
         c.Lists.Add("discord");
         Check(c.Mode == ProxyMode.Vless && c.VlessLink == Link && s.Lists.Count == 2, "Clone: новые поля, список копии независим");
+    }
+
+    static void SiteEntryTests()
+    {
+        var ok = new[]
+        {
+            ("example.com", "example.com"), ("  Example.COM ", "example.com"),
+            ("https://www.Example.com/path?q=1", "www.example.com"), ("example.com/page", "example.com"),
+            ("example.com:8443", "example.com"), ("*.example.com", "example.com"), (".example.com", "example.com"),
+            ("сайт.рф", "xn--80aswg.xn--p1ai"), ("1.2.3.4", "1.2.3.4"), ("https://1.2.3.4/x", "1.2.3.4"),
+            ("10.1.2.3/8", "10.0.0.0/8"), ("2001:db8::1", "2001:db8::1"), ("2001:db8::/32", "2001:db8::/32"),
+        };
+        foreach (var (input, want) in ok)
+            Check(SiteEntry.Parse(input, out var e) == want && e == null, "SiteEntry: " + input);
+
+        const string Whole = "Введите адрес целиком, например example.com", Bad = "Это не домен и не IP-адрес";
+        foreach (var (input, want) in new[] { ("localhost", Whole), ("привет мир", Bad), ("1.2.3", Bad), ("10.0.0.0/33", Bad), ("a_b.com", Bad) })
+            Check(SiteEntry.Parse(input, out var e) == null && e == want, "SiteEntry ошибка: " + input);
+
+        Check(SiteEntry.Display("xn--80aswg.xn--p1ai") == "сайт.рф" && SiteEntry.Display("1.2.3.4") == "1.2.3.4", "SiteEntry.Display");
+        Check(SiteEntry.Cidr("1.2.3.4") == "1.2.3.4/32" && SiteEntry.Cidr("2001:db8::1") == "2001:db8::1/128" && SiteEntry.Cidr("10.0.0.0/8") == "10.0.0.0/8", "SiteEntry.Cidr");
+        Check(SiteEntry.IsAddress("10.0.0.0/8") && !SiteEntry.IsAddress("example.com"), "SiteEntry.IsAddress");
+    }
+
+    static void SettingsV5Tests()
+    {
+        const string Link = "vless://3f1c0a52-0000-4000-8000-000000000001@h.example.com:443?security=tls&sni=a.com";
+        var p = Path.GetTempFileName();
+        var s = new Settings { Sites = new List<string> { "example.com", "1.2.3.4" } };
+        s.Save(p);
+        Check(Settings.Load(p).Sites.SequenceEqual(new[] { "example.com", "1.2.3.4" }), "Settings v5: Sites туда и обратно");
+        File.WriteAllText(p, """{"Sites":["Example.com","https://example.com/x","мусор мусор",5,"1.2.3.4"]}""");
+        Check(Settings.Load(p).Sites.SequenceEqual(new[] { "example.com", "1.2.3.4" }), "Settings v5: мусор и дубли в Sites отфильтрованы");
+        File.WriteAllText(p, """{"Port":1080}""");
+        Check(Settings.Load(p).Sites.Count == 0, "Settings v5: без Sites пустой список");
+        File.Delete(p);
+
+        var c = s.Clone();
+        c.Sites.Add("a.com");
+        Check(!ReferenceEquals(c.Sites, s.Sites) && s.Sites.Count == 2 && c.Sites.Count == 3, "Settings v5: Clone копирует Sites");
+
+        Check(new Settings { Mode = ProxyMode.Vless, VlessLink = Link, Sites = new List<string> { "example.com" } }.Validate() == null, "Validate Vless: только сайт");
+        Check(new Settings { Mode = ProxyMode.Vless, VlessLink = Link }.Validate() == "Добавьте приложение или сайт либо включите список", "Validate Vless: ничего нет");
     }
 
     static void CatalogsTests()

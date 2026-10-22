@@ -35,6 +35,8 @@ namespace ViviTune
         public string VlessLink { get; set; } = "";
         public List<string> Lists { get; set; } = new List<string>(); // id включённых списков ITDog
 
+        public List<string> Sites { get; set; } = new List<string>(); // свои сайты: нормализованные домены/IP/подсети
+
         // Читает и v1 (Apps: ["путь"]), и v2 (Apps: [{Path, Enabled}]); неизвестные элементы пропускает.
         public static Settings Load(string path)
         {
@@ -57,6 +59,11 @@ namespace ViviTune
                     {
                         foreach (var item in larr)
                             if (item is JsonValue iv2 && iv2.TryGetValue<string>(out var lid) && Catalogs.ListById(lid) is { } known && !s.Lists.Contains(known.Id)) s.Lists.Add(known.Id);
+                    }
+                    else if (kv.Key.Equals("Sites", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonArray sarr)
+                    {
+                        foreach (var item in sarr)
+                            if (item is JsonValue sv && sv.TryGetValue<string>(out var site) && SiteEntry.Parse(site, out _) is { } norm && !s.Sites.Contains(norm)) s.Sites.Add(norm);
                     }
                 }
                 return s;
@@ -88,7 +95,7 @@ namespace ViviTune
             if (Mode == ProxyMode.Vless)
             {
                 VlessServer.Parse(VlessLink, out var linkError);
-                return linkError ?? (ProcessNames().Count + Lists.Count == 0 ? "Добавьте приложение или включите список сайтов" : null);
+                return linkError ?? (ProcessNames().Count + Lists.Count + Sites.Count == 0 ? "Добавьте приложение или сайт либо включите список" : null);
             }
             return ValidateProxy(Ip, Port) ?? ValidateDirectPort(DirectPort, Port)
                 ?? (ProcessNames().Count + BypassNames().Count == 0 ? "Добавьте хотя бы одно приложение" : null);
@@ -122,7 +129,7 @@ namespace ViviTune
         public Settings Clone() => new Settings
         {
             Ip = Ip, Port = Port, DirectPort = DirectPort,
-            Mode = Mode, VlessLink = VlessLink, Lists = Lists.ToList(),
+            Mode = Mode, VlessLink = VlessLink, Lists = Lists.ToList(), Sites = Sites.ToList(),
             Apps = Apps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList(),
             DirectApps = DirectApps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList()
         };
