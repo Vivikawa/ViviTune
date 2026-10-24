@@ -138,6 +138,14 @@ namespace ViviTune
             "inbounds", new object[] { D("type", "mixed", "tag", "in", "listen", "127.0.0.1", "listen_port", port) },
             "outbounds", new object[] { proxy.DeepClone() }), Json.DictionaryStringObject);
 
+        // Host транспорта: ws — headers.Host; httpupgrade, xhttp, http — host (у http строка или массив, берём первый)
+        static string? TransportHost(JsonObject? tr)
+        {
+            var h = tr?["type"]?.GetValue<string>() == "ws" ? (tr["headers"] as JsonObject)?["Host"] : tr?["host"];
+            if (h is JsonArray a) h = a.Count > 0 ? a[0] : null;
+            return h is JsonValue v && v.TryGetValue<string>(out var r) && r.Length > 0 ? r : null;
+        }
+
         // Outbound "proxy" от движка: адрес — уже разрешённый IP сервера, поправки как у Hiddify (ray2sing).
         public static JsonObject ProxyOutbound(Server s, IPAddress ip)
         {
@@ -147,8 +155,18 @@ namespace ViviTune
             if (s.Type == "vless" && !o.ContainsKey("packet_encoding")) o["packet_encoding"] = "xudp";
             var tls = o["tls"] as JsonObject;
             bool tlsOn = tls?["enabled"]?.GetValue<bool>() == true;
-            if (tlsOn && !tls!.ContainsKey("server_name") && !IPAddress.TryParse(s.Host, out _)) tls["server_name"] = s.Host;
-            if (o["transport"] is JsonObject tr && tr["type"]?.GetValue<string>() == "grpc")
+            var tr = o["transport"] as JsonObject;
+            var ttype = tr?["type"]?.GetValue<string>();
+            var domain = IPAddress.TryParse(s.Host, out _) ? null : s.Host;
+            // движок не выводит SNI из host= (у 2.4 так было): берём из транспорта, потом домен сервера
+            if (tlsOn && !tls!.ContainsKey("server_name") && (TransportHost(tr) ?? domain) is { } sni) tls["server_name"] = sni;
+            // server заменён на IP — Host у ws/httpupgrade иначе стал бы IP (CDN не поймёт); xhttp не трогаем
+            if (TransportHost(tr) == null && (tls?["server_name"]?.GetValue<string>() ?? domain) is { } hh)
+            {
+                if (ttype == "ws") (tr!["headers"] ??= new JsonObject())["Host"] = hh;
+                else if (ttype == "httpupgrade") tr!["host"] = hh;
+            }
+            if (tr != null && ttype == "grpc")
             {
                 if (tlsOn && !tls!.ContainsKey("alpn")) tls["alpn"] = new JsonArray("h2"); // gRPC — это HTTP/2
                 // ping HTTP/2 после 15 с тишины, нет ответа 15 с — новое соединение

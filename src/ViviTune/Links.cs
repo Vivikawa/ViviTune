@@ -23,7 +23,10 @@ namespace ViviTune
                 {
                     case "vless":
                     case "trojan":
-                        if (Type == "trojan") parts.Add("Trojan");
+                    case "vmess":
+                    case "shadowsocks":
+                    case "socks":
+                        if (Type != "vless") parts.Add(Type switch { "trojan" => "Trojan", "vmess" => "VMess", "shadowsocks" => "Shadowsocks", _ => "SOCKS" });
                         parts.Add(Outbound["tls"]?["reality"]?["enabled"]?.GetValue<bool>() == true ? "Reality"
                             : Outbound["tls"]?["enabled"]?.GetValue<bool>() == true ? "TLS" : "без TLS");
                         parts.Add(Outbound["transport"]?["type"]?.GetValue<string>() switch
@@ -38,6 +41,7 @@ namespace ViviTune
                         if (Outbound["flow"]?.GetValue<string>() is { Length: > 0 }) parts.Add("Vision");
                         break;
                     case "hysteria2": parts.Add("Hysteria2"); break;
+                    case "tuic": parts.Add("TUIC"); break;
                     default: parts.Add(Type); break;
                 }
                 return string.Join(" · ", parts);
@@ -54,6 +58,11 @@ namespace ViviTune
             link = link?.Trim().Trim('﻿').Trim();
             if (string.IsNullOrEmpty(link)) { error = "Вставьте ссылку в настройках"; return null; }
             if (!link.Contains("://")) { error = "Это не ссылка"; return null; }
+            if (link.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || link.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                error = "Это адрес подписки. Подписки появятся в следующей версии — пока вставьте ссылку на один сервер (vless://, hysteria2://, trojan://…)";
+                return null;
+            }
             try
             {
                 var (code, o, err) = run(link);

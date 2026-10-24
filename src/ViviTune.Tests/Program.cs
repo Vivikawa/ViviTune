@@ -203,7 +203,8 @@ static class Program
         // outbound'ы как их отдаёт движок (decode-link): без tag, server — имя из ссылки
         Server Srv(string json) => new("n", JsonNode.Parse(json)!.AsObject(), []);
         var reality = Srv($"{{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"{U}\",\"flow\":\"xtls-rprx-vision\",\"tls\":{{\"enabled\":true,\"server_name\":\"www.microsoft.com\",\"utls\":{{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"reality\":{{\"enabled\":true,\"public_key\":\"PUBKEY\",\"short_id\":\"ab12\"}}}}}}");
-        var wsLink = Srv($"{{\"type\":\"vless\",\"server\":\"1.2.3.4\",\"server_port\":8443,\"uuid\":\"{U}\",\"tls\":{{\"enabled\":true,\"alpn\":[\"h2\",\"http/1.1\"],\"utls\":{{\"enabled\":true,\"fingerprint\":\"firefox\"}}}},\"transport\":{{\"type\":\"ws\",\"path\":\"/ws?ed=2048\",\"headers\":{{\"Host\":\"cdn.example.com\"}}}}}}");
+        // ws — настоящий вывод decode-link для ...type=ws&path=/ws?ed=2048&host=cdn.example.com&fp=firefox&alpn=h2,http/1.1 (alpn на ws движок отбрасывает, ed= превращает в max_early_data)
+        var wsLink = Srv($"{{\"type\":\"vless\",\"server\":\"1.2.3.4\",\"server_port\":8443,\"uuid\":\"{U}\",\"tls\":{{\"enabled\":true,\"utls\":{{\"enabled\":true,\"fingerprint\":\"firefox\"}}}},\"transport\":{{\"type\":\"ws\",\"path\":\"/ws\",\"headers\":{{\"Host\":\"cdn.example.com\"}},\"max_early_data\":2048,\"early_data_header_name\":\"Sec-WebSocket-Protocol\"}}}}");
         var grpcLink = Srv($"{{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":8920,\"uuid\":\"{U}\",\"tls\":{{\"enabled\":true,\"server_name\":\"www.microsoft.com\",\"utls\":{{\"enabled\":true,\"fingerprint\":\"randomized\"}},\"reality\":{{\"enabled\":true,\"public_key\":\"PUBKEY\",\"short_id\":\"ab12\"}}}},\"transport\":{{\"type\":\"grpc\",\"service_name\":\"svc\"}}}}");
         var plainLink = Srv($"{{\"type\":\"vless\",\"server\":\"h.example.com\",\"server_port\":80,\"uuid\":\"{U}\"}}");
         var srv = IPAddress.Parse("203.0.113.5");
@@ -244,9 +245,9 @@ static class Program
         var w = V(wsLink, files, @"C:\a\chrome.exe");
         var wo = Obj(Arr(w["outbounds"])[0]);
         var tr = Obj(wo["transport"]);
-        Check(Str(tr["type"]) == "ws" && Str(tr["path"]) == "/ws?ed=2048" && Str(Obj(tr["headers"])["Host"]) == "cdn.example.com", "VLESS: ws transport");
+        Check(Str(tr["type"]) == "ws" && Str(tr["path"]) == "/ws" && (int)tr["max_early_data"]! == 2048 && Str(tr["early_data_header_name"]) == "Sec-WebSocket-Protocol" && Str(Obj(tr["headers"])["Host"]) == "cdn.example.com", "VLESS: ws transport, early data");
         var wt = Obj(wo["tls"]);
-        Check(Arr(wt["alpn"]).Select(x => Str(x)).SequenceEqual(new[] { "h2", "http/1.1" }) && !wt.ContainsKey("reality") && !wt.ContainsKey("insecure") && !wo.ContainsKey("flow"), "VLESS: tls+ws, alpn, нет reality");
+        Check(Str(Obj(wt["utls"])["fingerprint"]) == "firefox" && Str(wt["server_name"]) == "cdn.example.com" && !wt.ContainsKey("reality") && !wt.ContainsKey("insecure") && !wo.ContainsKey("flow"), "VLESS: tls+ws, utls, SNI из Host, нет reality");
 
         var plain = V(plainLink, files, @"C:\a\chrome.exe");
         Check(!Obj(Arr(plain["outbounds"])[0]).ContainsKey("tls"), "VLESS: без security нет tls");
@@ -293,7 +294,57 @@ static class Program
         var own = P("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"u\",\"packet_encoding\":\"packetaddr\"}");
         Check(Str(own["packet_encoding"]) == "packetaddr", "ProxyOutbound: свой packet_encoding не перетираем");
 
+        // F7: Host ws/httpupgrade после подмены server на IP не должен стать IP
+        var wsNoHost = P("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true},\"transport\":{\"type\":\"ws\",\"path\":\"/w\"}}");
+        Check(Str(Obj(Obj(wsNoHost["transport"])["headers"])["Host"]) == "nl.example.com", "ProxyOutbound: ws без host — Host = домен сервера");
+        var wsSni = P("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true,\"server_name\":\"s.example.com\"},\"transport\":{\"type\":\"ws\"}}");
+        Check(Str(Obj(Obj(wsSni["transport"])["headers"])["Host"]) == "s.example.com", "ProxyOutbound: ws без host — Host = server_name");
+        var wsHost = P("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true},\"transport\":{\"type\":\"ws\",\"headers\":{\"Host\":\"cdn.example.com\"}}}");
+        Check(Str(Obj(Obj(wsHost["transport"])["headers"])["Host"]) == "cdn.example.com" && Str(Obj(wsHost["tls"])["server_name"]) == "cdn.example.com", "ProxyOutbound: host из ссылки не трогаем, он же SNI");
+        var wsIp = P("{\"type\":\"vless\",\"server\":\"1.2.3.4\",\"server_port\":443,\"uuid\":\"u\",\"transport\":{\"type\":\"ws\"}}");
+        Check(!Obj(wsIp["transport"]).ContainsKey("headers"), "ProxyOutbound: ws, адрес-IP и нет host — Host не выдумывается");
+        var huNoHost = P("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":80,\"uuid\":\"u\",\"transport\":{\"type\":\"httpupgrade\"}}");
+        Check(Str(Obj(huNoHost["transport"])["host"]) == "nl.example.com", "ProxyOutbound: httpupgrade без host — host = домен сервера");
+        var xhNoHost = P("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true},\"transport\":{\"type\":\"xhttp\"}}");
+        Check(!Obj(xhNoHost["transport"]).ContainsKey("host") && !Obj(xhNoHost["transport"]).ContainsKey("headers"), "ProxyOutbound: xhttp без host не трогаем");
+        // F1: SNI из транспорта, потом из домена
+        var httpArr = P("{\"type\":\"vless\",\"server\":\"1.2.3.4\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true},\"transport\":{\"type\":\"http\",\"host\":[\"a.example.com\",\"b.example.com\"]}}");
+        var httpStr = P("{\"type\":\"vless\",\"server\":\"1.2.3.4\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true},\"transport\":{\"type\":\"http\",\"host\":\"c.example.com\"}}");
+        Check(Str(Obj(httpArr["tls"])["server_name"]) == "a.example.com" && Str(Obj(httpStr["tls"])["server_name"]) == "c.example.com", "ProxyOutbound: SNI из http host (массив — первый, строка)");
+        var xhHost = P("{\"type\":\"vless\",\"server\":\"1.2.3.4\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true},\"transport\":{\"type\":\"xhttp\",\"host\":\"x.example.com\"}}");
+        Check(Str(Obj(xhHost["tls"])["server_name"]) == "x.example.com", "ProxyOutbound: SNI из xhttp host");
+
         SingBoxCheck(srv);
+        EngineHostSni(srv);
+        SummaryTests();
+    }
+
+    // F1 на настоящем выводе движка: SNI из host=, а sni= из ссылки главнее
+    static void EngineHostSni(IPAddress srv)
+    {
+        var exe = SingBoxExe();
+        if (exe == null) { Check(false, "sing-box.exe рядом с тестами (SNI из host)"); return; }
+        const string U = "3f1c0a52-0000-4000-8000-000000000001";
+        var run = Links.Engine(exe);
+        string? Sni(string q, out JsonObject? o)
+        {
+            var d = Links.Decode($"vless://{U}@1.2.3.4:8443?security=tls&{q}", run, out _);
+            o = d == null ? null : ConfigBuilder.ProxyOutbound(d, srv);
+            return o?["tls"]?["server_name"]?.GetValue<string>();
+        }
+        Check(Sni("type=ws&host=cdn.example.com&path=%2Fws", out var ws) == "cdn.example.com" && Str(ws!["server"]) == "203.0.113.5", "движок+ProxyOutbound: ws host= даёт SNI");
+        Check(Sni("type=httpupgrade&host=cdn.example.com", out _) == "cdn.example.com", "движок+ProxyOutbound: httpupgrade host= даёт SNI");
+        Check(Sni("type=xhttp&host=cdn.example.com", out _) == "cdn.example.com", "движок+ProxyOutbound: xhttp host= даёт SNI");
+        Check(Sni("type=ws&host=cdn.example.com&sni=a.example.com", out _) == "a.example.com", "движок+ProxyOutbound: sni= главнее host=");
+    }
+
+    static void SummaryTests()
+    {
+        Server S(string json) => new("n", JsonNode.Parse(json)!.AsObject(), []);
+        Check(S("{\"type\":\"vmess\",\"server\":\"h.example.com\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true},\"transport\":{\"type\":\"ws\"}}").Summary == "h.example.com:443 · VMess · TLS · WebSocket", "Summary: VMess");
+        Check(S("{\"type\":\"shadowsocks\",\"server\":\"h.example.com\",\"server_port\":8388,\"method\":\"aes-128-gcm\",\"password\":\"p\"}").Summary == "h.example.com:8388 · Shadowsocks · без TLS · TCP", "Summary: Shadowsocks");
+        Check(S("{\"type\":\"socks\",\"server\":\"h.example.com\",\"server_port\":1080}").Summary == "h.example.com:1080 · SOCKS · без TLS · TCP", "Summary: SOCKS");
+        Check(S("{\"type\":\"tuic\",\"server\":\"h.example.com\",\"server_port\":443,\"tls\":{\"enabled\":true}}").Summary == "h.example.com:443 · TUIC", "Summary: TUIC");
     }
 
     // sing-box.exe рядом с тестами, иначе third_party в исходниках; null — не найден
@@ -331,6 +382,8 @@ static class Program
         Check(Links.Decode("vless://x", _ => throw new FileNotFoundException("Не найден sing-box.exe"), out e) == null && e == "sing-box не разобрал ссылку: Не найден sing-box.exe", "Links: движок не запустился");
         int calls = 0;
         Check(Links.Decode("  ", _ => { calls++; return (0, "", ""); }, out e) == null && e == "Вставьте ссылку в настройках" && calls == 0, "Links: пусто — без движка");
+        foreach (var sub in new[] { "https://sub.example.com/abc", "HTTP://sub.example.com/abc" })
+            Check(Links.Decode(sub, _ => { calls++; return (0, "", ""); }, out e) == null && e == "Это адрес подписки. Подписки появятся в следующей версии — пока вставьте ссылку на один сервер (vless://, hysteria2://, trojan://…)" && calls == 0, "Links: адрес подписки — русская ошибка, без движка");
         Check(Links.Decode("просто текст", _ => { calls++; return (0, "", ""); }, out e) == null && e == "Это не ссылка" && calls == 0, "Links: не ссылка — без движка");
 
         var self = Environment.ProcessPath;
@@ -1775,8 +1828,8 @@ static class Program
                 var fv2 = new FakeVless(root, resolve: _ => throw new System.Net.Sockets.SocketException(11001));
                 using var ss2 = new Session(s, fb, NewCfg(), Up, Delay, fv2.Deps);
                 ss2.ConnectAsync().Wait(2000);
-                Check(ss.State == ConnState.Disconnected && ss.Error == "VLESS-сервер не найден: nl.example.com" && fv.Resolves == 1 && fv.Reaches == 0
-                      && ss2.State == ConnState.Disconnected && ss2.Error == "VLESS-сервер не найден: nl.example.com" && fb.Starts == 0,
+                Check(ss.State == ConnState.Disconnected && ss.Error == "Сервер не найден: nl.example.com" && fv.Resolves == 1 && fv.Reaches == 0
+                      && ss2.State == ConnState.Disconnected && ss2.Error == "Сервер не найден: nl.example.com" && fb.Starts == 0,
                     "Session VLESS: имя сервера не разрешилось (null или исключение) -> ошибка, sing-box не запускается");
             }
             {
@@ -1822,10 +1875,18 @@ static class Program
             }
             {
                 var fb = new FakeSingBox();
+                var fv = new FakeVless(root, decode: _ => (new Server("n", JsonNode.Parse("{\"type\":\"vless\",\"server\":\"203.0.113.5\",\"server_port\":443,\"tls\":{\"enabled\":\"да\"}}")!.AsObject(), []), null));
+                using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Disconnected && !string.IsNullOrEmpty(ss.Error) && !ss.Error.Contains("vless://") && fb.Starts == 0,
+                    "Session VLESS: ProxyOutbound упал -> ошибка, состояние не зависает");
+            }
+            {
+                var fb = new FakeSingBox();
                 var fv = new FakeVless(root, reach: (_, _) => "таймаут подключения");
                 using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay, fv.Deps);
                 ss.ConnectAsync().Wait(2000);
-                Check(ss.State == ConnState.Disconnected && ss.Error == "VLESS-сервер не отвечает: таймаут подключения" && fb.Starts == 0 && fv.Prepares == 0,
+                Check(ss.State == ConnState.Disconnected && ss.Error == "Сервер не отвечает: таймаут подключения" && fb.Starts == 0 && fv.Prepares == 0,
                     "Session VLESS: сервер не отвечает -> ошибка, sing-box не запускается");
             }
             {

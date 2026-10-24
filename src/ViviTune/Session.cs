@@ -500,15 +500,17 @@ public sealed class Session : IDisposable
             try { ip = vless.Resolve(srv.Host); }
             catch { ip = null; }
         }
-        if (ip == null) return ErrorVerdict("VLESS-сервер не найден: " + srv.Host);
+        if (ip == null) return ErrorVerdict("Сервер не найден: " + srv.Host);
         if (!srv.Udp) // у UDP-протоколов (Hysteria2, TUIC) TCP-проверка бессмысленна
         {
             string? down;
             try { down = vless.Reach(ip, srv.Port); }
             catch (Exception e) { down = e.Message; }
-            if (down != null) return ErrorVerdict("VLESS-сервер не отвечает: " + down);
+            if (down != null) return ErrorVerdict("Сервер не отвечает: " + down);
         }
-        var proxy = ConfigBuilder.ProxyOutbound(srv, ip);
+        JsonObject proxy;
+        try { proxy = ConfigBuilder.ProxyOutbound(srv, ip); }
+        catch (Exception e) { return ErrorVerdict("Ссылка не подходит: " + e.Message); }
 
         var lists = new ListsResult(new Dictionary<string, string>(), [], []);
         if (snap.Lists.Count > 0)
