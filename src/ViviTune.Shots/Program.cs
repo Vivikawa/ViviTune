@@ -120,6 +120,11 @@ window.ShowPage(NavPage.Home); // страница настроек заполн
 window.Height = 760;
 Shot(NavPage.Settings, "settings-subscription.png");
 window.Height = 600;
+// Окошко «Сервер не отвечает» / «Сервер переключён»
+var dt = ServerAlert.DownText("🇩🇪 Германия #2", "🇳🇱 Нидерланды", 48);
+AlertShot(new ServerAlert(dt.Title, dt.Text, dt.Best, null, null, null), "alert-down.png");
+var sw = ServerAlert.SwitchedText("🇩🇪 Германия #2", "🇳🇱 Нидерланды", 48);
+AlertShot(new ServerAlert(sw.Title, sw.Text, null, null, null, TimeSpan.FromSeconds(10)), "alert-switched.png");
 s.Mode = ProxyMode.Socks5; // назад к SOCKS5 для снимка пустого списка
 s.DirectTab = false;
 s.State = ConnState.Disconnected;
@@ -141,6 +146,21 @@ void Shot(NavPage page, string file)
     var path = Path.Combine(outDir, file);
     frame.Save(path, PngBitmapEncoderOptions.Default);
     Console.WriteLine(path);
+}
+
+void AlertShot(ServerAlert w, string file)
+{
+    w.Show();
+    for (int i = 0; i < 3; i++)
+    {
+        Dispatcher.UIThread.RunJobs();
+        AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+    }
+    var frame = w.CaptureRenderedFrame() ?? throw new InvalidOperationException("кадр не отрисован: " + file);
+    var path = Path.Combine(outDir, file);
+    frame.Save(path, PngBitmapEncoderOptions.Default);
+    Console.WriteLine(path);
+    w.Close();
 }
 
 static ViewState Demo()

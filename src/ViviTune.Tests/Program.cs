@@ -49,6 +49,7 @@ static class Program
         SubStoreTests();
         DevLogTests();
         ViewStateSubTests();
+        AlertTextTests();
         return failures == 0 ? 0 : 1;
     }
 
@@ -571,6 +572,13 @@ static class Program
         var sw = System.Diagnostics.Stopwatch.StartNew();
         while (!f()) { if (sw.ElapsedMilliseconds > ms) return false; Thread.Sleep(5); }
         return true;
+    }
+
+    static void AlertTextTests()
+    {
+        Check(ServerAlert.DownText("🇩🇪 Германия #2", "🇳🇱 Нидерланды", 48) == ("Сервер не отвечает", "🇩🇪 Германия #2 не отвечает уже 1,5 минуты. Выберите другой сервер.", "🇳🇱 Нидерланды · 48 мс"), "текст «не отвечает»");
+        Check(ServerAlert.DownText("A", null, null).Best == null, "без лучшего — без кнопки");
+        Check(ServerAlert.SwitchedText("🇩🇪 Германия #2", "🇳🇱 Нидерланды", 48) == ("Сервер переключён", "🇩🇪 Германия #2 не отвечал — теперь 🇳🇱 Нидерланды · 48 мс."), "текст «переключён»");
     }
 
     static void ServerWatchTests()

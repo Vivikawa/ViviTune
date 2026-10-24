@@ -481,6 +481,28 @@ namespace ViviTune.Ui
                 if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
                 window.Activate();
             }
+            // Окошко над треем: одно за раз, новое событие закрывает старое. Имена — из строк списка, иначе часть ключа до «|»
+            ServerAlert? alert = null; // только UI-поток
+            string NameOf(string key) => state.Servers.FirstOrDefault(r => r.Key == key)?.Name ?? key.Split('|')[0];
+            void ShowAlert(ServerAlert w)
+            {
+                alert?.Close();
+                alert = w;
+                w.Closed += (_, _) => { if (alert == w) alert = null; };
+                w.Show();
+            }
+            session.ServerDown += (cur, best, ms) => Dispatcher.UIThread.Post(() =>
+            {
+                var t = ServerAlert.DownText(NameOf(cur), best == null ? null : NameOf(best), ms);
+                ShowAlert(new ServerAlert(t.Title, t.Text, t.Best,
+                    best == null ? null : () => state.RequestSelectServer(best), // та же очередь, что у списка серверов
+                    () => { ShowWindow(); window.ShowPage(NavPage.Settings); }, null));
+            });
+            session.ServerSwitched += (from, to, ms) => Dispatcher.UIThread.Post(() =>
+            {
+                var t = ServerAlert.SwitchedText(NameOf(from), NameOf(to), ms);
+                ShowAlert(new ServerAlert(t.Title, t.Text, null, null, null, TimeSpan.FromSeconds(10)));
+            });
             var openItem = new NativeMenuItem("Открыть");
             openItem.Click += (_, _) => ShowWindow();
             var quitItem = new NativeMenuItem("Выход");

@@ -1,0 +1,44 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ViviTune.Ui.ServerAlert"
+        Title="ViviTune"
+        Icon="/Assets/icon.ico"
+        Width="300"
+        SizeToContent="Height"
+        CanResize="False"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowDecorations="None"
+        Background="{StaticResource CardBrush}"
+        Foreground="{StaticResource TextBrush}"
+        FontFamily="fonts:Inter#Inter"
+        FontSize="12.5">
+  <Window.Styles>
+    <Style Selector="Button.alert">
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="9,5" />
+    </Style>
+    <Style Selector="Button.alert:pointerover /template/ ContentPresenter">
+      <Setter Property="Opacity" Value="0.88" />
+    </Style>
+    <Style Selector="Button#CloseButton">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+      <Setter Property="Padding" Value="4,0" />
+    </Style>
+  </Window.Styles>
+  <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="12,12,12,10">
+    <StackPanel Spacing="6">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <Ellipse Width="18" Height="18" Fill="{StaticResource AccentGradient}" VerticalAlignment="Center" />
+        <TextBlock Name="TitleText" Grid.Column="1" Margin="8,0" FontWeight="SemiBold" VerticalAlignment="Center" />
+        <Button Name="CloseButton" Grid.Column="2" Content="✕" />
+      </Grid>
+      <TextBlock Name="BodyText" Margin="26,0,0,4" TextWrapping="Wrap" Foreground="#c9cde6" LineHeight="17" />
+      <WrapPanel Name="Buttons" ItemSpacing="6" LineSpacing="6" Margin="26,0,0,0">
+        <Button Name="BestButton" Classes="alert" Background="{StaticResource AccentGradient}" Foreground="#0b0d1a" FontWeight="SemiBold" />
+        <Button Name="AllButton" Classes="alert" Background="{StaticResource LineBrush}" Foreground="{StaticResource TextBrush}" Content="Все серверы" />
+      </WrapPanel>
+    </StackPanel>
+  </Border>
+</Window>
