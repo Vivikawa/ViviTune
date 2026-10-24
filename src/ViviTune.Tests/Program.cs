@@ -37,6 +37,7 @@ static class Program
         VlessProbeTests();
         ViewStateVlessTests();
         AutostartTests();
+        LinksTests();
         return failures == 0 ? 0 : 1;
     }
 
@@ -279,17 +280,63 @@ static class Program
         SingBoxCheck(reality, wsLink, grpcLink, srv);
     }
 
+    // sing-box.exe рядом с тестами, иначе third_party в исходниках; null — не найден
+    static string? SingBoxExe()
+    {
+        var exe = Path.Combine(AppContext.BaseDirectory, "sing-box.exe");
+        if (File.Exists(exe)) return exe;
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        {
+            var cand = Path.Combine(dir.FullName, "src", "ViviTune", "third_party", "sing-box.exe");
+            if (File.Exists(cand)) return cand;
+        }
+        return null;
+    }
+
+    static void LinksTests()
+    {
+        const string VlessJson = "{\"type\":\"vless\",\"tag\":\"🇳🇱 NL\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"u\",\"flow\":\"xtls-rprx-vision\",\"tls\":{\"enabled\":true,\"server_name\":\"nl.example.com\",\"reality\":{\"enabled\":true,\"public_key\":\"k\"}},\"transport\":{\"type\":\"grpc\"}}";
+        var sent = new List<string>();
+        var s = Links.Decode("﻿  vless://x \r\n", l => { sent.Add(l); return (0, VlessJson, "warning: the gRPC mode multi is not supported, gun is used\n"); }, out var e);
+        Check(e == null && sent.SequenceEqual(["vless://x"]), "Links: в движок уходит ссылка без пробелов и BOM");
+        Check(s!.Name == "🇳🇱 NL" && s.Host == "nl.example.com" && s.Port == 443 && !s.Outbound.ContainsKey("tag") && !s.Udp, "Links: имя из tag, адрес, порт; tag убран");
+        Check(s.Summary == "nl.example.com:443 · Reality · gRPC · Vision", "Links: сводка VLESS");
+        Check(s.Warnings.SequenceEqual(["the gRPC mode multi is not supported, gun is used"]), "Links: предупреждения движка");
+        var hy = Links.Decode("hysteria2://p@1.2.3.4:443", _ => (0, "{\"type\":\"hysteria2\",\"server\":\"1.2.3.4\",\"server_port\":443,\"password\":\"p\",\"tls\":{\"enabled\":true}}", ""), out _);
+        Check(hy!.Udp && hy.Name == "1.2.3.4" && hy.Summary == "1.2.3.4:443 · Hysteria2", "Links: Hysteria2 — UDP, без tag имя = адрес");
+        var tj = Links.Decode("trojan://p@h.example.com:443", _ => (0, "{\"type\":\"trojan\",\"server\":\"h.example.com\",\"server_port\":443,\"password\":\"p\",\"tls\":{\"enabled\":true},\"transport\":{\"type\":\"ws\"}}", ""), out _);
+        Check(tj!.Summary == "h.example.com:443 · Trojan · TLS · WebSocket", "Links: сводка Trojan");
+        var v6 = Links.Decode("vless://x", _ => (0, "{\"type\":\"vless\",\"server\":\"2001:db8::1\",\"server_port\":80,\"uuid\":\"u\"}", ""), out _);
+        Check(v6!.Summary == "[2001:db8::1]:80 · без TLS · TCP", "Links: IPv6 в скобках, без TLS, TCP");
+        var xh = Links.Decode("vless://x", _ => (0, "{\"type\":\"vless\",\"server\":\"h.example.com\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true},\"transport\":{\"type\":\"xhttp\",\"mode\":\"auto\"}}", ""), out _);
+        Check(xh!.Summary == "h.example.com:443 · TLS · xHTTP", "Links: сводка xHTTP");
+        Check(Links.Decode("vless://bad", _ => (2, "", "error: invalid server address\n"), out e) == null && e == "Ссылка не подходит: invalid server address", "Links: отказ движка (код 2)");
+        Check(Links.Decode("vless://x", _ => (1, "", "unknown command\n"), out e) == null && e == "sing-box не разобрал ссылку (код 1)", "Links: прочий код движка");
+        Check(Links.Decode("vless://x", _ => throw new FileNotFoundException("Не найден sing-box.exe"), out e) == null && e == "sing-box не разобрал ссылку: Не найден sing-box.exe", "Links: движок не запустился");
+        int calls = 0;
+        Check(Links.Decode("  ", _ => { calls++; return (0, "", ""); }, out e) == null && e == "Вставьте ссылку в настройках" && calls == 0, "Links: пусто — без движка");
+        Check(Links.Decode("просто текст", _ => { calls++; return (0, "", ""); }, out e) == null && e == "Это не ссылка" && calls == 0, "Links: не ссылка — без движка");
+
+        var exe = SingBoxExe();
+        if (exe == null) { Check(false, "sing-box.exe рядом с тестами"); return; }
+        const string U = "3f1c0a52-0000-4000-8000-000000000001", Pbk = "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0";
+        var run = Links.Engine(exe);
+        var g = Links.Decode($"vless://{U}@g.example.com:8920?encryption=none&fp=randomized&mode=multi&pbk={Pbk}&security=reality&sid=ab12&sni=g.example.com&spx=%2Fx&type=grpc#gRPC", run, out e);
+        Check(e == null && g!.Type == "vless" && g.Outbound["transport"]!["type"]!.GetValue<string>() == "grpc" && g.Warnings.Count > 0, "движок: VLESS gRPC Reality, предупреждение про multi");
+        var x = Links.Decode($"vless://{U}@x.example.com:443?security=reality&sni=x.example.com&fp=chrome&pbk={Pbk}&sid=ab12&type=xhttp&path=%2Fxh&mode=auto#xh", run, out e);
+        Check(e == null && x!.Outbound["transport"]!["type"]!.GetValue<string>() == "xhttp", "движок: VLESS xHTTP");
+        var h = Links.Decode("hysteria2://pass@hy.example.com:443?sni=hy.example.com&obfs=salamander&obfs-password=o#Нидерланды 🇳🇱", run, out e);
+        Check(e == null && h!.Udp && h.Name == "Нидерланды 🇳🇱" && h.Outbound["obfs"]!["type"]!.GetValue<string>() == "salamander", "движок: сырой Юникод в имени, Hysteria2 с salamander");
+        var t = Links.Decode("trojan://pass@t.example.com:443?security=tls&sni=t.example.com&type=ws&path=%2Fw#t", run, out e);
+        Check(e == null && t!.Type == "trojan", "движок: Trojan");
+        Check(Links.Decode("vless://@h:443", run, out e) == null && e!.StartsWith("Ссылка не подходит: "), "движок: битая ссылка — код 2");
+    }
+
     // Реальный sing-box check: конфиги из BuildVless принимаются движком из third_party
     static void SingBoxCheck(string reality, string wsLink, string grpcLink, IPAddress srv)
     {
-        var exe = Path.Combine(AppContext.BaseDirectory, "sing-box.exe");
-        if (!File.Exists(exe))
-            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
-            {
-                var cand = Path.Combine(dir.FullName, "src", "ViviTune", "third_party", "sing-box.exe");
-                if (File.Exists(cand)) { exe = cand; break; }
-            }
-        if (!File.Exists(exe)) { Check(false, "sing-box.exe рядом с тестами"); return; }
+        var exe = SingBoxExe();
+        if (exe == null) { Check(false, "sing-box.exe рядом с тестами"); return; }
 
         var tmp = Directory.CreateTempSubdirectory("vivitune-sb").FullName;
         try
