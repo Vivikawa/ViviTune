@@ -38,6 +38,7 @@ static class Program
         PingerTests();
         SettingsV6Tests();
         SubSessionTests();
+        ServerWatchTests();
         RuleFilesTests();
         ListStoreTests();
         VlessProbeTests();
@@ -428,6 +429,48 @@ static class Program
                 ss.Disconnect();
                 Check(!ss.SelectServer(K1) && !ss.PingConnected(CancellationToken.None) && ss.Pings.Count == 0, "после отключения SelectServer и PingConnected - false, Pings пусты");
             }
+            // проверка текущего сервера
+            {
+                // три неудачи с галкой: переключение на самого быстрого из остальных, CurrentServer и события
+                var fb = new FakeSingBox(); var api = new FakeApi { Delays = { ["s0"] = 120, ["s1"] = null, ["s2"] = 40, ["proxy"] = 30 } };
+                var fv = new FakeVless(root, cache: Cache(), api: api, watchEvery: TimeSpan.FromMilliseconds(20));
+                var changed = new List<string>(); var sw = new List<(string, string, int)>();
+                using var ss = new Session(Sub(K1, true), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ServerChanged += k => { lock (changed) changed.Add(k); };
+                ss.ServerSwitched += (f, t, m) => { lock (sw) sw.Add((f, t, m)); };
+                ss.ConnectAsync().Wait(2000); // автовыбор: s2
+                api.Delays["s2"] = 200;       // s2 станет медленнее s0
+                lock (api.Calls) for (int i = 0; i < 3; i++) api.Proxy.Enqueue(null);
+                bool got = Until(() => { lock (sw) return sw.Count > 0; });
+                lock (sw) lock (changed)
+                    Check(got && sw[0] == (K2, K0, 120) && ss.CurrentServer == K0 && changed.Last() == K0 && api.Selected == ("proxy", "s0"),
+                        "watch в Session: переключение обновляет CurrentServer, ServerChanged и ServerSwitched");
+            }
+            {
+                // без галки: ServerDown с ключом; ручной SelectServer сбрасывает счётчик и «уже сообщали»
+                var fb = new FakeSingBox(); var api = new FakeApi();
+                for (int i = 0; i < 100; i++) api.Proxy.Enqueue(null);
+                var fv = new FakeVless(root, cache: Cache(), api: api, watchEvery: TimeSpan.FromMilliseconds(20));
+                var downs = new List<(string, string?, int?)>();
+                using var ss = new Session(Sub(K1), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ServerDown += (c, b, m) => { lock (downs) downs.Add((c, b, m)); };
+                ss.ConnectAsync().Wait(2000);
+                bool first = Until(() => { lock (downs) return downs.Count > 0; });
+                Thread.Sleep(150);
+                lock (downs) Check(first && downs.Count == 1 && downs[0] == (K1, null, null), "watch в Session: ServerDown с ключом, один раз");
+                Check(ss.SelectServer(K0), "SelectServer после Down");
+                Check(Until(() => { lock (downs) return downs.Count == 2; }) && downs[1].Item1 == K0, "SelectServer сбрасывает watch: снова сообщает");
+            }
+            {
+                // PingConnected, пока watch пингует: общий затвор, по одному
+                var fb = new FakeSingBox(); var api = new FakeApi { Wait = TimeSpan.FromMilliseconds(15), Delays = { ["s0"] = 120, ["s1"] = 90, ["s2"] = 40 } };
+                var fv = new FakeVless(root, cache: Cache(), api: api, watchEvery: TimeSpan.FromMilliseconds(5));
+                using var ss = new Session(Sub(K1, true), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(5000);
+                for (int i = 0; i < 6; i++) { ss.PingConnected(CancellationToken.None); Thread.Sleep(10); }
+                int checks; lock (api.Calls) checks = api.ProxyChecks;
+                Check(api.MaxParallel == 1 && checks >= 3, "PingConnected и watch не пингуют одновременно");
+            }
             {
                 // одиночная ссылка: SelectServer/PingConnected не работают, ServerChanged нет
                 var fb = new FakeSingBox(); var fv = new FakeVless(root); int ev = 0;
@@ -438,6 +481,81 @@ static class Program
             }
         }
         finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
+    static bool Until(Func<bool> f, int ms = 3000)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!f()) { if (sw.ElapsedMilliseconds > ms) return false; Thread.Sleep(5); }
+        return true;
+    }
+
+    static void ServerWatchTests()
+    {
+        string[] tags = ["s0", "s1", "s2"];
+        var iv = TimeSpan.FromMilliseconds(20);
+        {
+            var api = new FakeApi { Delays = { ["proxy"] = 50 } }; api.Proxy.Enqueue(null); api.Proxy.Enqueue(null);
+            var downs = new List<(string, string?, int?)>();
+            using var w = new ServerWatch(api, tags, () => "s1", () => false, iv, 100, TimeSpan.FromSeconds(1));
+            w.Down += (c, b, m) => { lock (downs) downs.Add((c, b, m)); };
+            w.Start();
+            bool got = Until(() => { lock (api.Calls) return api.ProxyChecks >= 6; });
+            lock (downs) Check(got && downs.Count == 0, "две неудачи — ещё не «не отвечает»");
+        }
+        {
+            var api = new FakeApi { Delays = { ["s0"] = 120 } };
+            var downs = new List<(string, string?, int?)>();
+            using var w = new ServerWatch(api, tags, () => "s1", () => false, iv, 100, TimeSpan.FromSeconds(1), null,
+                () => new Dictionary<string, int?> { ["s0"] = 120, ["s1"] = 30, ["s2"] = null });
+            w.Down += (c, b, m) => { lock (downs) downs.Add((c, b, m)); };
+            w.Start();
+            bool got = Until(() => { lock (downs) return downs.Count > 0; });
+            lock (downs) Check(got && downs.Single() == ("s1", "s0", 120), "три неудачи без галки — Down с лучшим из пингов");
+            Thread.Sleep(200);
+            lock (downs) Check(downs.Count == 1, "после Down повторно не сообщает, пока нет успеха");
+            lock (api.Calls) Check(api.Selected == null && api.Calls.All(c => c == "proxy"), "без галки серверы не пингуются и не выбираются");
+        }
+        {
+            var api = new FakeApi { Wait = TimeSpan.FromMilliseconds(5), Delays = { ["s0"] = 120, ["s2"] = 40 } };
+            var sw = new List<(string, string, int)>();
+            using var w = new ServerWatch(api, tags, () => "s1", () => true, iv, 100, TimeSpan.FromSeconds(1));
+            w.Switched += (f, t, m) => { lock (sw) sw.Add((f, t, m)); };
+            w.Start();
+            bool got = Until(() => { lock (sw) return sw.Count > 0; });
+            lock (sw) Check(got && sw[0] == ("s1", "s2", 40) && api.Selected == ("proxy", "s2"), "три неудачи с галкой — переключение на самого быстрого");
+            Check(api.MaxParallel == 1, "проверки и пинги — по одному");
+        }
+        {
+            var api = new FakeApi();
+            var downs = new List<(string, string?, int?)>();
+            using var w = new ServerWatch(api, tags, () => "s1", () => true, iv, 100, TimeSpan.FromSeconds(1));
+            w.Down += (c, b, m) => { lock (downs) downs.Add((c, b, m)); };
+            w.Start();
+            bool got = Until(() => { lock (downs) return downs.Count > 0; });
+            Thread.Sleep(200);
+            lock (downs) Check(got && downs.Count == 1 && downs[0] == ("s1", null, null) && api.Selected == null, "с галкой никто не ответил — Down без кнопки");
+        }
+        {
+            var api = new FakeApi { Delays = { ["proxy"] = 50 } };
+            for (int i = 0; i < 4; i++) api.Proxy.Enqueue(null);
+            var downs = new List<(string, string?, int?)>();
+            using var w = new ServerWatch(api, tags, () => "s1", () => false, TimeSpan.FromMilliseconds(150), 100, TimeSpan.FromSeconds(1));
+            w.Down += (c, b, m) => { lock (downs) downs.Add((c, b, m)); };
+            w.Start();
+            Until(() => { lock (api.Calls) return api.ProxyChecks >= 2; });
+            w.Reset();
+            bool got = Until(() => { lock (api.Calls) return api.ProxyChecks >= 6; });
+            lock (downs) Check(got && downs.Count == 0, "ручное переключение сбрасывает счётчик");
+        }
+        {
+            var api = new FakeApi(); int n = 0;
+            var w = new ServerWatch(api, tags, () => "s1", () => false, iv, 100, TimeSpan.FromSeconds(1));
+            w.Down += (_, _, _) => Interlocked.Increment(ref n);
+            w.Start(); w.Dispose();
+            Thread.Sleep(200);
+            Check(n == 0 && api.ProxyChecks <= 1, "Dispose останавливает проверки");
+        }
     }
 
     static void SubscriptionConfigTests()
@@ -2749,12 +2867,19 @@ sealed class FakeApi : IClashApi
     public int MaxParallel;
     public TimeSpan Wait;
     public (string Group, string Tag)? Selected;
+    public Queue<int?> Proxy = new();  // очередь ответов для "proxy"; пустая — как обычно по Delays
+    public int ProxyChecks;
     int cur;
     public int? Delay(string tag, int timeoutMs, CancellationToken ct)
     {
         var n = Interlocked.Increment(ref cur);
-        lock (Calls) { Calls.Add(tag); MaxParallel = Math.Max(MaxParallel, n); }
-        try { if (Wait > TimeSpan.Zero) Thread.Sleep(Wait); return Delays.TryGetValue(tag, out var d) ? d : null; }
+        int? queued = null; bool fromQueue = false;
+        lock (Calls)
+        {
+            Calls.Add(tag); MaxParallel = Math.Max(MaxParallel, n);
+            if (tag == "proxy") { ProxyChecks++; if (Proxy.Count > 0) { queued = Proxy.Dequeue(); fromQueue = true; } }
+        }
+        try { if (Wait > TimeSpan.Zero) Thread.Sleep(Wait); if (fromQueue) return queued; return Delays.TryGetValue(tag, out var d) ? d : null; }
         finally { Interlocked.Decrement(ref cur); }
     }
     public bool Select(string group, string tag) { Selected = (group, tag); return true; }
@@ -2785,7 +2910,7 @@ sealed class FakeVless
     public FakeVless(string dir, Func<string, IPAddress?>? resolve = null, Func<IPAddress, int, string?>? reach = null,
         Func<IReadOnlyList<string>, ListsResult>? lists = null, Func<int, string, CancellationToken, string?>? afterStart = null,
         Func<string, (Server?, string?)>? decode = null, SubCache? cache = null, Func<SubCache?, (SubCache?, string?)>? fetch = null,
-        FakeApi? api = null, TimeSpan? pingCap = null)
+        FakeApi? api = null, TimeSpan? pingCap = null, TimeSpan? watchEvery = null)
     {
         Cache = cache;
         Deps = new VlessDeps
@@ -2800,6 +2925,7 @@ sealed class FakeVless
             },
             Api = (port, secret) => { lock (Api) { ApiPort = port; ApiSecret = secret; } return api ?? new FakeApi(); },
             PingMs = 100,
+            WatchEvery = watchEvery ?? TimeSpan.FromSeconds(30),
             PingCap = pingCap ?? TimeSpan.FromSeconds(5),
             Decode = decode ?? (l => (FakeServer(l), null)),
             Resolve = host => { Interlocked.Increment(ref Resolves); return resolve?.Invoke(host); },

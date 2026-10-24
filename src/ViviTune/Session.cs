@@ -31,6 +31,7 @@ public sealed class VlessDeps
     public required Func<int, string, IClashApi> Api { get; init; }       // (порт, секрет) -> клиент Clash API
     public int PingMs { get; init; } = 3000;                              // таймаут одного пинга
     public TimeSpan PingCap { get; init; } = TimeSpan.FromSeconds(20);    // сколько всего пинговать при автовыборе
+    public TimeSpan WatchEvery { get; init; } = TimeSpan.FromSeconds(30); // как часто проверять текущий сервер подписки
 }
 
 // Проверка после запуска sing-box не прошла: текст для пользователя как есть, без «Не удалось запустить: ».
@@ -69,6 +70,8 @@ public sealed record Verdict(Exits Live, IReadOnlyList<string> Warnings, string?
 // её отмену (cts) берём под gate вместе с attempt/ticket, Disconnect отменяет её до того, как ждать ops.
 // Подписка: сервер, Clash API и пинги (currentServer, api, pings) тоже под gate; автовыбор идёт в StartSingBox под ops
 // (отмена — cts, как у AfterStart), SelectServer и PingConnected ходят в Clash API вне блокировок и сверяют epoch.
+// Проверка текущего сервера (ServerWatch) живёт вместе со счётчиком скорости, только в подписке; её события идут вне gate.
+// Все пинги Clash API (PingConnected, проверка и автопереключение watch) идут через pingGate: по одному.
 // Настройки копируются в потоке вызывающего (ConnectAsync/AppsChanged): живой Settings из фона не читается.
 // Обработчики событий не должны блокироваться на UI-потоке (Post, а не Invoke).
 public sealed class Session : IDisposable
@@ -115,6 +118,8 @@ public sealed class Session : IDisposable
     bool disposed;
     string? currentServer;                    // подписка: ключ сервера, на котором работает sing-box
     IClashApi? api;                           // подписка: клиент Clash API запущенного sing-box
+    ServerWatch? watch;                       // подписка: проверка текущего сервера
+    readonly SemaphoreSlim pingGate = new(1, 1);
     IReadOnlyDictionary<string, int?> pings = new Dictionary<string, int?>(); // ключ -> последний пинг; заменяется целиком
 
     public event Action? Changed;
@@ -122,6 +127,8 @@ public sealed class Session : IDisposable
     public event Action<Speed>? Speed;
     public event Action<string>? ServerChanged; // ключ текущего сервера подписки (вне gate)
     public event Action? PingsChanged;          // вне gate
+    public event Action<string, string?, int?>? ServerDown;   // (ключ текущего, ключ лучшего или null, его пинг); вне gate
+    public event Action<string, string, int>? ServerSwitched; // (было, стало, пинг): сервер переключил watch; вне gate
     public string? CurrentServer { get { lock (gate) return currentServer; } }
     public IReadOnlyDictionary<string, int?> Pings { get { lock (gate) return pings; } }
 
@@ -331,6 +338,7 @@ public sealed class Session : IDisposable
                 if (t != ticket || state != ConnState.Restarting) return;
                 if (fail != null) old = ToDisconnected(fail); // ни одного живого выхода: останавливаем, как Disconnect
                 else { old = meter; meter = null; }
+                watch?.Dispose(); watch = null; // sing-box сейчас остановят: проверять нечего
                 ct = cts.Token; // вместе с ticket: Disconnect после этой точки отменит именно её
             }
             old?.Dispose();
@@ -695,6 +703,7 @@ public sealed class Session : IDisposable
     // Под gate: что запомнить о запущенном sing-box; возвращает prep с актуальным выбранным сервером.
     VlessPrep? Adopt(Started st, VlessPrep? p)
     {
+        watch?.Dispose(); watch = null;
         (api as IDisposable)?.Dispose();
         api = st.Api;
         if (p?.Selected == null) { currentServer = null; return p; }
@@ -702,7 +711,40 @@ public sealed class Session : IDisposable
         currentServer = p.Keys.GetValueOrDefault(tag);
         if (st.Pings != null)
             pings = st.Pings.Where(kv => p.Keys.ContainsKey(kv.Key)).ToDictionary(kv => p.Keys[kv.Key], kv => kv.Value);
+        StartWatch(st.Api!, p);
         return p with { Selected = tag };
+    }
+
+    // Под gate; стартует вместе со счётчиком скорости (Adopt зовут в тот же момент, когда его запоминают).
+    void StartWatch(IClashApi a, VlessPrep p)
+    {
+        var tags = p.Outbounds.Select(o => (string)o["tag"]!).ToList();
+        ServerWatch? w = null;
+        w = new ServerWatch(a, tags,
+            () => { lock (gate) return prep?.Selected ?? ""; },
+            () => { lock (gate) return applied?.AutoServer ?? false; },
+            vless!.WatchEvery, vless.PingMs, vless.PingCap, pingGate,
+            () => { lock (gate) return p.Keys.Where(kv => pings.ContainsKey(kv.Value)).ToDictionary(kv => kv.Key, kv => pings[kv.Value]); });
+        w.Down += (cur, best, ms) =>
+        {
+            lock (gate) if (watch != w || state != ConnState.Connected) return;
+            ServerDown?.Invoke(p.Keys.GetValueOrDefault(cur) ?? cur, best == null ? null : p.Keys.GetValueOrDefault(best), ms);
+        };
+        w.Switched += (from, to, ms) =>
+        {
+            string? fromKey, toKey = p.Keys.GetValueOrDefault(to);
+            lock (gate)
+            {
+                if (watch != w || state != ConnState.Connected || toKey == null || prep == null) return;
+                fromKey = currentServer;
+                prep = prep with { Selected = to };
+                currentServer = toKey;
+            }
+            ServerChanged?.Invoke(toKey);
+            ServerSwitched?.Invoke(fromKey ?? p.Keys.GetValueOrDefault(from) ?? from, toKey, ms);
+        };
+        watch = w;
+        w.Start();
     }
 
     // Переключение сервера подписки без перезапуска (Clash API). Вызывать не в UI-потоке.
@@ -725,6 +767,7 @@ public sealed class Session : IDisposable
             if (state != ConnState.Connected || epoch != e) return false; // пока переключали, отключили или перезапустили
             prep = prep! with { Selected = tag };
             currentServer = key;
+            watch?.Reset();
         }
         ServerChanged?.Invoke(key);
         return true;
@@ -739,16 +782,22 @@ public sealed class Session : IDisposable
             if (state != ConnState.Connected || api == null || prep is not { Selected: not null } p0) return false;
             a = api; p = p0; e = epoch;
         }
-        Pinger.Ping(a, p.Outbounds.Select(o => (string)o["tag"]!).ToList(), vless!.PingMs, null, (tag, ms) =>
+        try { pingGate.Wait(ct); } // watch может пинговать: по одному
+        catch (OperationCanceledException) { return true; }
+        try
         {
-            if (ct.IsCancellationRequested) return; // отменённый пинг не ответ
-            lock (gate)
+            Pinger.Ping(a, p.Outbounds.Select(o => (string)o["tag"]!).ToList(), vless!.PingMs, null, (tag, ms) =>
             {
-                if (state != ConnState.Connected || epoch != e) return;
-                pings = new Dictionary<string, int?>(pings) { [p.Keys[tag]] = ms };
-            }
-            PingsChanged?.Invoke();
-        }, ct);
+                if (ct.IsCancellationRequested) return; // отменённый пинг не ответ
+                lock (gate)
+                {
+                    if (state != ConnState.Connected || epoch != e) return;
+                    pings = new Dictionary<string, int?>(pings) { [p.Keys[tag]] = ms };
+                }
+                PingsChanged?.Invoke();
+            }, ct);
+        }
+        finally { pingGate.Release(); }
         return true;
     }
 
@@ -796,6 +845,7 @@ public sealed class Session : IDisposable
         error = err;
         udpOk = null;
         prep = null;
+        watch?.Dispose(); watch = null;
         (api as IDisposable)?.Dispose();
         api = null;
         currentServer = null;
