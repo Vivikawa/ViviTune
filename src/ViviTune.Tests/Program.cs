@@ -1204,19 +1204,37 @@ static class Program
             path.StartsWith("/proxies/proxy/delay") ? (200, "{\"delay\":50}") :
             path.StartsWith("/dns/query") ? (200, good) : null;
         var ready = TimeSpan.FromSeconds(1);
+        var pause = TimeSpan.FromMilliseconds(20);
 
         Check(VlessProbe.AfterStart(Fake(Ok), CancellationToken.None, ready) == null, "VlessProbe: всё хорошо -> null");
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var e = VlessProbe.AfterStart(Fake(_ => null), CancellationToken.None, TimeSpan.FromMilliseconds(300));
         Check(e == "sing-box не запустился, подробности в логе" && sw.ElapsedMilliseconds < 1000, "VlessProbe: Clash API молчит -> не запустился, быстро");
-        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/proxies") ? (504, "") : Ok(p)), CancellationToken.None, ready) == "VLESS-сервер не отвечает", "VlessProbe: delay 504");
-        const string dohErr = "DNS через VLESS-сервер не отвечает";
-        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/dns") ? (500, "{}") : Ok(p)), CancellationToken.None, ready) == dohErr, "VlessProbe: dns 500");
-        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/dns") ? (200, "{\"Status\":2}") : Ok(p)), CancellationToken.None, ready) == dohErr, "VlessProbe: dns без ответа");
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/proxies") ? (504, "") : Ok(p)), CancellationToken.None, ready, pause) == "Сервер не отвечает", "VlessProbe: delay 504");
+        const string dohErr = "DNS через сервер не отвечает";
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/dns") ? (500, "{}") : Ok(p)), CancellationToken.None, ready, pause) == dohErr, "VlessProbe: dns 500");
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/dns") ? (200, "{\"Status\":2}") : Ok(p)), CancellationToken.None, ready, pause) == dohErr, "VlessProbe: dns без ответа");
         using var cts = new CancellationTokenSource();
         cts.Cancel();
         sw.Restart();
         Check(VlessProbe.AfterStart((p, c) => c.IsCancellationRequested ? null : Ok(p), cts.Token, ready) != null && sw.ElapsedMilliseconds < 500, "VlessProbe: отмена -> не null сразу");
+
+        // повтор: первая попытка может попасть в сброс сети сразу после старта TUN
+        int delays = 0, dnss = 0;
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/proxies") && ++delays == 1 ? (504, "") : Ok(p)), CancellationToken.None, ready, pause) == null && delays == 2,
+            "VlessProbe: delay упал и ответил со 2-й попытки -> null");
+        delays = 0;
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/proxies") ? (delays++ >= 0 ? (504, "") : null) : Ok(p)), CancellationToken.None, ready, pause) == "Сервер не отвечает" && delays == 2,
+            "VlessProbe: delay упал дважды -> ошибка, ровно 2 попытки");
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/dns") && ++dnss == 1 ? (500, "{}") : Ok(p)), CancellationToken.None, ready, pause) == null && dnss == 2,
+            "VlessProbe: dns упал и ответил со 2-й попытки -> null");
+        dnss = 0;
+        Check(VlessProbe.AfterStart(Fake(p => p.StartsWith("/dns") ? (dnss++ >= 0 ? (500, "{}") : null) : Ok(p)), CancellationToken.None, ready, pause) == dohErr && dnss == 2,
+            "VlessProbe: dns упал дважды -> ошибка, ровно 2 попытки");
+        using var cts2 = new CancellationTokenSource();
+        sw.Restart();
+        var r2 = VlessProbe.AfterStart((p, c) => { if (p.StartsWith("/proxies")) { cts2.CancelAfter(50); return (504, ""); } return Ok(p); }, cts2.Token, ready, TimeSpan.FromSeconds(5));
+        Check(r2 != null && sw.ElapsedMilliseconds < 1000, "VlessProbe: отмена в паузе между попытками -> сразу");
 
         Check(VlessProbe.DnsAnswered(good), "DnsAnswered: Status 0 и Answer");
         Check(!VlessProbe.DnsAnswered("{\"Status\":0}") && !VlessProbe.DnsAnswered("{\"Status\":3,\"Answer\":[{}]}")
@@ -1341,7 +1359,7 @@ static class Program
         Apps = A(@"C:\a\chrome.exe"), DirectApps = A(@"C:\q\qbittorrent.exe") };
 
     const string Reality = "vless://3f1c0a52-0000-4000-8000-000000000001@203.0.113.5:443?security=reality&sni=www.microsoft.com&pbk=PUBKEY&sid=ab12&type=tcp&flow=xtls-rprx-vision";
-    const string DnsDown = "DNS через VLESS-сервер не отвечает";
+    const string DnsDown = "DNS через сервер не отвечает";
 
     // VLESS: reality на 203.0.113.5:443, одна программа и список YouTube
     static Settings Vless1() => new Settings { Mode = ProxyMode.Vless, VlessLink = Reality, Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "youtube" } };
@@ -2191,7 +2209,7 @@ static class Program
                 // Review Focus 4: «Отключить» во время проверки после запуска
                 var fb = new FakeSingBox();
                 using var started = new ManualResetEventSlim();
-                var fv = new FakeVless(root, afterStart: (_, _, ct) => { started.Set(); ct.WaitHandle.WaitOne(5000); return "VLESS-сервер не отвечает"; });
+                var fv = new FakeVless(root, afterStart: (_, _, ct) => { started.Set(); ct.WaitHandle.WaitOne(5000); return "Сервер не отвечает"; });
                 using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay, fv.Deps);
                 var t = ss.ConnectAsync();
                 bool inCheck = started.Wait(2000);

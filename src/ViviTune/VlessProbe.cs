@@ -12,8 +12,9 @@ public static class VlessProbe
 
     // get(путь с запросом, отмена) -> (HTTP-код, тело) или null, если Clash API не ответил.
     // Не бросает исключений, на отмену сразу возвращает текст ошибки (Session его игнорирует).
-    public static string? AfterStart(Func<string, CancellationToken, (int Status, string Body)?> get, CancellationToken ct, TimeSpan readyTimeout)
+    public static string? AfterStart(Func<string, CancellationToken, (int Status, string Body)?> get, CancellationToken ct, TimeSpan readyTimeout, TimeSpan? retryPause = null)
     {
+        var pause = retryPause ?? TimeSpan.FromSeconds(1.5);
         const string notStarted = "sing-box не запустился, подробности в логе";
         try
         {
@@ -24,10 +25,19 @@ public static class VlessProbe
                 if (sw.Elapsed >= readyTimeout) return notStarted;
                 if (ct.WaitHandle.WaitOne(100)) return notStarted;
             }
-            if (get("/proxies/proxy/delay?timeout=5000&url=" + Uri.EscapeDataString(DelayUrl), ct) is not { Status: 200 })
-                return "VLESS-сервер не отвечает";
-            if (get("/dns/query?name=" + DnsProbeName + "&type=A", ct) is not { Status: 200 } dns || !DnsAnswered(dns.Body))
-                return "DNS через VLESS-сервер не отвечает";
+            // две попытки: сразу после старта TUN sing-box может сбросить сеть и оборвать первое соединение
+            for (var i = 0; ; i++)
+            {
+                if (get("/proxies/proxy/delay?timeout=5000&url=" + Uri.EscapeDataString(DelayUrl), ct) is { Status: 200 }) break;
+                if (i == 1) return "Сервер не отвечает";
+                if (ct.WaitHandle.WaitOne(pause)) return notStarted;
+            }
+            for (var i = 0; ; i++)
+            {
+                if (get("/dns/query?name=" + DnsProbeName + "&type=A", ct) is { Status: 200 } dns && DnsAnswered(dns.Body)) break;
+                if (i == 1) return "DNS через сервер не отвечает";
+                if (ct.WaitHandle.WaitOne(pause)) return notStarted;
+            }
             return null;
         }
         catch { return notStarted; }
