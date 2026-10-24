@@ -35,10 +35,11 @@ namespace ViviTune.Ui
                 // сначала IPv4; исключения ловит Session
                 Resolve = name => System.Net.Dns.GetHostAddresses(name).OrderBy(a => a.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork).FirstOrDefault(),
                 Reach = ProxyProbe.Reach,
-                PrepareLists = (ids, link, server) =>
+                Decode = link => (Links.Decode(link, Links.Engine(Path.Combine(dir, "sing-box.exe")), out var e), e),
+                PrepareLists = (ids, proxy) =>
                 {
                     using var fetch = new Runner(Path.Combine(dir, "sing-box.exe")); // Job Object: умрёт вместе с нами
-                    return ListStore.PrepareVia(Path.Combine(dir, "lists"), ids, fetch, link, server, DateTime.UtcNow);
+                    return ListStore.PrepareVia(Path.Combine(dir, "lists"), ids, fetch, proxy, DateTime.UtcNow);
                 },
                 AfterStart = (p, s, ct) => VlessProbe.AfterStart(p, s, ct) ?? Flush()
             });

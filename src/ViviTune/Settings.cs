@@ -94,8 +94,8 @@ namespace ViviTune
         {
             if (Mode == ProxyMode.Vless)
             {
-                VlessServer.Parse(VlessLink, out var linkError);
-                return linkError ?? (ProcessNames().Count + Lists.Count + Sites.Count == 0 ? "Добавьте приложение или сайт либо включите список" : null);
+                var link = VlessLink?.Trim() ?? "";
+                return link == "" ? "Вставьте ссылку в настройках" : !link.Contains("://") ? "Это не ссылка" : (ProcessNames().Count + Lists.Count + Sites.Count == 0 ? "Добавьте приложение или сайт либо включите список" : null);
             }
             return ValidateProxy(Ip, Port) ?? ValidateDirectPort(DirectPort, Port)
                 ?? (ProcessNames().Count + BypassNames().Count == 0 ? "Добавьте хотя бы одно приложение" : null);
@@ -167,6 +167,7 @@ namespace ViviTune
     // Значения конфига sing-box (ConfigBuilder) — object, поэтому их типы перечислены здесь.
     [JsonSerializable(typeof(Settings))]
     [JsonSerializable(typeof(Dictionary<string, object>))]
+    [JsonSerializable(typeof(JsonObject))]
     [JsonSerializable(typeof(object[]))]
     [JsonSerializable(typeof(string[]))]
     [JsonSerializable(typeof(string))]

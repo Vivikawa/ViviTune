@@ -138,7 +138,7 @@ static class Program
                 var r = ListStore.Prepare(dir, new[] { "fresh" }, id => { Interlocked.Increment(ref calls); return good; }, now);
                 Check(calls == 0 && r.Files["fresh"] == P("fresh") && r.Failed.Count == 0 && r.Stale.Count == 0, "ListStore: свежая копия не скачивается");
                 var sb = new FakeSingBox();
-                var rv = ListStore.PrepareVia(dir, new[] { "fresh" }, sb, "", IPAddress.Loopback, now);
+                var rv = ListStore.PrepareVia(dir, new[] { "fresh" }, sb, new JsonObject(), now);
                 Check(sb.Starts == 0 && rv.Files["fresh"] == P("fresh") && Directory.GetFiles(dir, "fetch-*").Length == 0,
                     "ListStore: всё свежее — временный sing-box не запускается");
             }
@@ -201,16 +201,19 @@ static class Program
         Check(Obj(Arr(gc["inbounds"])[0])["strict_route"]!.GetValue<bool>() == false && !gj.Contains("vless") && !gj.Contains("process_name"), "SOCKS5: strict_route false, нет vless и process_name");
 
         const string U = "3f1c0a52-0000-4000-8000-000000000001";
-        var reality = $"vless://{U}@nl.example.com:443?security=reality&sni=www.microsoft.com&pbk=PUBKEY&sid=ab12&type=tcp&flow=xtls-rprx-vision";
-        var wsLink = $"vless://{U}@1.2.3.4:8443?security=tls&type=ws&host=cdn.example.com&path=%2Fws%3Fed%3D2048&fp=firefox&alpn=h2,http/1.1";
-        var grpcLink = $"vless://{U}@nl.example.com:8920?security=reality&sni=www.microsoft.com&pbk=PUBKEY&sid=ab12&type=grpc&serviceName=svc&fp=randomized";
+        // outbound'ы как их отдаёт движок (decode-link): без tag, server — имя из ссылки
+        Server Srv(string json) => new("n", JsonNode.Parse(json)!.AsObject(), []);
+        var reality = Srv($"{{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"{U}\",\"flow\":\"xtls-rprx-vision\",\"tls\":{{\"enabled\":true,\"server_name\":\"www.microsoft.com\",\"utls\":{{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"reality\":{{\"enabled\":true,\"public_key\":\"PUBKEY\",\"short_id\":\"ab12\"}}}}}}");
+        var wsLink = Srv($"{{\"type\":\"vless\",\"server\":\"1.2.3.4\",\"server_port\":8443,\"uuid\":\"{U}\",\"tls\":{{\"enabled\":true,\"alpn\":[\"h2\",\"http/1.1\"],\"utls\":{{\"enabled\":true,\"fingerprint\":\"firefox\"}}}},\"transport\":{{\"type\":\"ws\",\"path\":\"/ws?ed=2048\",\"headers\":{{\"Host\":\"cdn.example.com\"}}}}}}");
+        var grpcLink = Srv($"{{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":8920,\"uuid\":\"{U}\",\"tls\":{{\"enabled\":true,\"server_name\":\"www.microsoft.com\",\"utls\":{{\"enabled\":true,\"fingerprint\":\"randomized\"}},\"reality\":{{\"enabled\":true,\"public_key\":\"PUBKEY\",\"short_id\":\"ab12\"}}}},\"transport\":{{\"type\":\"grpc\",\"service_name\":\"svc\"}}}}");
+        var plainLink = Srv($"{{\"type\":\"vless\",\"server\":\"h.example.com\",\"server_port\":80,\"uuid\":\"{U}\"}}");
         var srv = IPAddress.Parse("203.0.113.5");
         var allTags = new[] { "apps", "sites" }.Concat(Catalogs.Lists.Select(l => "list-" + l.Id)).ToArray();
         var files = new[] { "youtube", "russia_inside" };
-        JsonObject V(string link, string[] lists, params string[] apps)
+        JsonObject V(Server link, string[] lists, params string[] apps)
         {
-            var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Apps = A(apps), Lists = lists.ToList() };
-            return JsonNode.Parse(ConfigBuilder.BuildVless(st, 9090, "t", srv, RD))!.AsObject();
+            var st = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = A(apps), Lists = lists.ToList() };
+            return JsonNode.Parse(ConfigBuilder.BuildVless(st, 9090, "t", ConfigBuilder.ProxyOutbound(link, srv), srv, RD))!.AsObject();
         }
 
         var c = V(reality, files, @"C:\a\chrome.exe");
@@ -246,7 +249,7 @@ static class Program
         var wt = Obj(wo["tls"]);
         Check(Arr(wt["alpn"]).Select(x => Str(x)).SequenceEqual(new[] { "h2", "http/1.1" }) && !wt.ContainsKey("reality") && !wt.ContainsKey("insecure") && !wo.ContainsKey("flow"), "VLESS: tls+ws, alpn, нет reality");
 
-        var plain = V($"vless://{U}@h.example.com:80", files, @"C:\a\chrome.exe");
+        var plain = V(plainLink, files, @"C:\a\chrome.exe");
         Check(!Obj(Arr(plain["outbounds"])[0]).ContainsKey("tls"), "VLESS: без security нет tls");
 
         // gRPC — как у Hiddify (ray2sing): ping при простое 15 с, ALPN h2, если в ссылке его нет
@@ -264,22 +267,34 @@ static class Program
         Check(Str(Obj(c["dns"])["strategy"]) == "ipv4_only", "VLESS DNS: только IPv4 (у сервера может не быть IPv6)");
 
         // снимки, отличающиеся программами, сайтами и списками, дают тот же конфиг: за них отвечают файлы правил
-        string Cj(Settings st) => ConfigBuilder.BuildVless(st, 9090, "t", srv, RD);
-        var s1 = new Settings { Mode = ProxyMode.Vless, VlessLink = reality, Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "youtube" }, Sites = new List<string> { "example.com" } };
-        var s2 = new Settings { Mode = ProxyMode.Vless, VlessLink = reality, Apps = A(@"C:\a\other.exe", @"C:\b\x.exe"), Lists = new List<string> { "telegram" }, Sites = new List<string> { "1.2.3.4" } };
+        string Cj(Settings st) => ConfigBuilder.BuildVless(st, 9090, "t", ConfigBuilder.ProxyOutbound(reality, srv), srv, RD);
+        var s1 = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "youtube" }, Sites = new List<string> { "example.com" } };
+        var s2 = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = A(@"C:\a\other.exe", @"C:\b\x.exe"), Lists = new List<string> { "telegram" }, Sites = new List<string> { "1.2.3.4" } };
         Check(Cj(s1) == Cj(s2), "BuildVless: программы, сайты и списки не влияют на конфиг");
 
         bool threw = false;
         try { V(reality, Array.Empty<string>()); } catch (InvalidOperationException) { threw = true; }
         Check(threw, "VLESS: нет программ, сайтов и списков -> исключение (Validate)");
 
-        var fe = JsonNode.Parse(ConfigBuilder.BuildFetch(reality, srv, 18080))!.AsObject();
+        var fe = JsonNode.Parse(ConfigBuilder.BuildFetch(ConfigBuilder.ProxyOutbound(reality, srv), 18080))!.AsObject();
         var fin = Obj(Arr(fe["inbounds"])[0]);
         Check(Str(fin["type"]) == "mixed" && Str(fin["listen"]) == "127.0.0.1" && (int)fin["listen_port"]! == 18080
             && Arr(fe["outbounds"]).Count == 1 && Arr(fe["outbounds"])[0]!.ToJsonString() == ob.ToJsonString()
             && !fe.ContainsKey("dns") && !fe.ContainsKey("route"), "VLESS fetch: только mixed на 127.0.0.1 и тот же outbound, без TUN");
 
-        SingBoxCheck(reality, wsLink, grpcLink, srv);
+        JsonObject P(string json) => ConfigBuilder.ProxyOutbound(new Server("n", JsonNode.Parse(json)!.AsObject(), []), IPAddress.Parse("203.0.113.5"));
+        var tlsNoSni = P("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true}}");
+        Check(Str(Obj(tlsNoSni["tls"])["server_name"]) == "nl.example.com" && Str(tlsNoSni["server"]) == "203.0.113.5", "ProxyOutbound: TLS без server_name получает домен");
+        var ipNoSni = P("{\"type\":\"vless\",\"server\":\"1.2.3.4\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true}}");
+        Check(!Obj(ipNoSni["tls"]).ContainsKey("server_name"), "ProxyOutbound: адрес-IP — server_name не выдумывается");
+        var grpcAlpn = P("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true,\"alpn\":[\"http/1.1\"]},\"transport\":{\"type\":\"grpc\"}}");
+        Check(Arr(Obj(grpcAlpn["tls"])["alpn"]).Select(Str).SequenceEqual(["http/1.1"]) && Str(Obj(grpcAlpn["transport"])["idle_timeout"]) == "15s", "ProxyOutbound: gRPC со своим ALPN — ALPN не трогаем, idle 15s");
+        var hy2 = P("{\"type\":\"hysteria2\",\"server\":\"hy.example.com\",\"server_port\":443,\"password\":\"p\",\"tls\":{\"enabled\":true,\"server_name\":\"hy.example.com\"}}");
+        Check(!hy2.ContainsKey("packet_encoding") && !hy2.ContainsKey("transport") && Str(hy2["tag"]) == "proxy", "ProxyOutbound: Hysteria2 без xudp и транспорта");
+        var own = P("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"u\",\"packet_encoding\":\"packetaddr\"}");
+        Check(Str(own["packet_encoding"]) == "packetaddr", "ProxyOutbound: свой packet_encoding не перетираем");
+
+        SingBoxCheck(srv);
     }
 
     // sing-box.exe рядом с тестами, иначе third_party в исходниках; null — не найден
@@ -343,7 +358,7 @@ static class Program
     }
 
     // Реальный sing-box check: конфиги из BuildVless принимаются движком из third_party
-    static void SingBoxCheck(string reality, string wsLink, string grpcLink, IPAddress srv)
+    static void SingBoxCheck(IPAddress srv)
     {
         var exe = SingBoxExe();
         if (exe == null) { Check(false, "sing-box.exe рядом с тестами"); return; }
@@ -367,14 +382,26 @@ static class Program
             Check(Run("rule-set", "compile", "--output", srs, src) == 0 && File.Exists(srs), "sing-box rule-set compile");
             var f = new Dictionary<string, string> { ["russia_inside"] = srs };
             var rd = Path.Combine(tmp, "rules");
-            foreach (var (name, link) in new[] { ("reality", reality.Replace("PUBKEY", "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0")), ("ws", wsLink), ("grpc", grpcLink.Replace("PUBKEY", "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0")) })
+            const string U = "3f1c0a52-0000-4000-8000-000000000001", Pbk = "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0";
+            var run = Links.Engine(exe);
+            foreach (var (name, link) in new[]
             {
-                var st = new Settings { Mode = ProxyMode.Vless, VlessLink = link, Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "russia_inside" }, Sites = new List<string> { "example.com", "10.0.0.0/8" } };
+                ("reality", $"vless://{U}@nl.example.com:443?security=reality&sni=www.microsoft.com&pbk={Pbk}&sid=ab12&type=tcp&flow=xtls-rprx-vision"),
+                ("ws", $"vless://{U}@1.2.3.4:8443?security=tls&type=ws&host=cdn.example.com&path=%2Fws%3Fed%3D2048&fp=firefox&alpn=h2,http/1.1"),
+                ("grpc", $"vless://{U}@nl.example.com:8920?security=reality&sni=www.microsoft.com&pbk={Pbk}&sid=ab12&type=grpc&serviceName=svc&fp=randomized"),
+                ("xhttp", $"vless://{U}@x.example.com:443?security=reality&sni=x.example.com&fp=chrome&pbk={Pbk}&sid=ab12&type=xhttp&path=%2Fxh&mode=auto"),
+                ("hysteria2", "hysteria2://pass@hy.example.com:443?sni=hy.example.com&obfs=salamander&obfs-password=o"),
+            })
+            {
+                var server = Links.Decode(link, run, out var derr);
+                if (server == null) { Check(false, "sing-box check: " + name + " — разбор: " + derr); continue; }
+                var proxy = ConfigBuilder.ProxyOutbound(server, srv);
+                var st = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "russia_inside" }, Sites = new List<string> { "example.com", "10.0.0.0/8" } };
                 var cfg = Path.Combine(tmp, name + ".json");
                 RuleFiles.Write(rd, st, f);
-                File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", srv, rd));
+                File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", proxy, srv, rd));
                 Check(Run("check", "-c", cfg) == 0, "sing-box check: " + name);
-                File.WriteAllText(cfg, ConfigBuilder.BuildFetch(link, srv, 18080));
+                File.WriteAllText(cfg, ConfigBuilder.BuildFetch(proxy, 18080));
                 Check(Run("check", "-c", cfg) == 0, "sing-box check: fetch " + name);
             }
             var both = Both();
@@ -407,7 +434,8 @@ static class Program
         Check(d.Mode == ProxyMode.Vless && d.Lists.SequenceEqual(new[] { "youtube" }), "Settings v4: мусор в Lists отфильтрован, старое поле Doh не мешает");
         File.Delete(p);
 
-        Check(new Settings { Mode = ProxyMode.Vless }.Validate() == "Вставьте VLESS-ссылку в настройках", "Validate Vless: пустая ссылка");
+        Check(new Settings { Mode = ProxyMode.Vless }.Validate() == "Вставьте ссылку в настройках", "Validate Vless: пустая ссылка");
+        Check(new Settings { Mode = ProxyMode.Vless, VlessLink = "abc" }.Validate() == "Это не ссылка", "Validate Vless: не ссылка");
         Check(new Settings { Mode = ProxyMode.Vless, VlessLink = Link }.Validate() == "Добавьте приложение или сайт либо включите список", "Validate Vless: нет программ и списков");
         Check(new Settings { Mode = ProxyMode.Vless, VlessLink = Link, Lists = new List<string> { "youtube" } }.Validate() == null, "Validate Vless: только список");
         Check(new Settings { VlessLink = "мусор", Apps = A(@"C:\a\x.exe") }.Validate() == null, "Validate Socks5: ссылку не смотрит");
@@ -1348,15 +1376,15 @@ static class Program
 
         var srv = IPAddress.Parse("203.0.113.5");
         var vs = new Settings { Mode = ProxyMode.Vless, VlessLink = Reality, Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "youtube", "telegram" } };
-        v = Session.EvaluateVless(vs, srv, NoFiles("telegram", "youtube"));
+        v = Session.EvaluateVless(vs, srv, new JsonObject(), NoFiles("telegram", "youtube"));
         Check(v.Error == null && v.Live == new Exits(true, false) && v.UdpOk == null && v.Vless != null && v.Vless.Server.Equals(srv) && v.Vless.ListFiles.Count == 0
             && v.Warnings.SequenceEqual(new[] { "Список Telegram не загрузился", "Список YouTube не загрузился" }),
             "EvaluateVless: два Failed -> два предупреждения в порядке Failed");
         vs.Apps.Clear();
-        v = Session.EvaluateVless(vs, srv, NoFiles("telegram", "youtube"));
+        v = Session.EvaluateVless(vs, srv, new JsonObject(), NoFiles("telegram", "youtube"));
         Check(v.Error == "Списки не загрузились" && v.Vless == null && v.Warnings.Count == 0, "EvaluateVless: нет программ и ни одного файла -> ошибка");
         var one = new Dictionary<string, string> { ["youtube"] = @"C:\l\youtube.srs" };
-        v = Session.EvaluateVless(vs, srv, new ListsResult(one, new[] { "telegram" }, Array.Empty<string>()));
+        v = Session.EvaluateVless(vs, srv, new JsonObject(), new ListsResult(one, new[] { "telegram" }, Array.Empty<string>()));
         Check(v.Error == null && v.Vless!.ListFiles.ContainsKey("youtube") && v.Warnings.SequenceEqual(new[] { "Список Telegram не загрузился" }),
             "EvaluateVless: без программ хватает одного загруженного списка");
     }
@@ -1806,6 +1834,35 @@ static class Program
                     "Session VLESS: имя сервера разрешается до запуска, в конфиг и проверку TCP идёт IP");
             }
             {
+                // Hysteria2 (UDP): TCP-проверки нет
+                var fb = new FakeSingBox();
+                var s = Vless1();
+                s.VlessLink = "hysteria2://p@hy.example.com:443";
+                var fv = new FakeVless(root, resolve: _ => IPAddress.Parse("198.51.100.7"), reach: (_, _) => "таймаут подключения");
+                using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Connected && fv.Reaches == 0, "Session: Hysteria2 без TCP-проверки");
+            }
+            {
+                // ошибка разбора — в статусе, sing-box не стартует
+                var fb = new FakeSingBox();
+                var fv = new FakeVless(root, decode: _ => (null, "Ссылка не подходит: invalid server address"));
+                using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Disconnected && ss.Error == "Ссылка не подходит: invalid server address" && fb.Starts == 0, "Session: ошибка разбора ссылки");
+            }
+            {
+                // предупреждения движка — в лог; списки качаются через готовый outbound с IP сервера
+                var fb = new FakeSingBox();
+                var fv = new FakeVless(root, decode: l => (new Server("n", FakeVless.FakeServer(l).Outbound, ["the gRPC mode multi is not supported, gun is used"]), null));
+                var logs = new List<string>();
+                using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.Log += m => { lock (logs) logs.Add(m); };
+                ss.ConnectAsync().Wait(2000);
+                lock (logs) Check(logs.Contains("Ссылка: the gRPC mode multi is not supported, gun is used"), "Session: предупреждение движка в логе");
+                Check(Str(fv.LastProxy!["server"]) == "203.0.113.5" && Str(fv.LastProxy["tag"]) == "proxy", "Session: PrepareLists получает outbound proxy с IP");
+            }
+            {
                 var fb = new FakeSingBox();
                 var fv = new FakeVless(root, reach: (_, _) => "таймаут подключения");
                 using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay, fv.Deps);
@@ -2102,7 +2159,7 @@ static class Program
                 var fv = new FakeVless(root);
                 using var ss = new Session(s, fb, NewCfg(), Up, Delay, fv.Deps);
                 ss.ConnectAsync().Wait(2000);
-                Check(ss.State == ConnState.Disconnected && ss.Error == "Вставьте VLESS-ссылку в настройках" && fb.Starts == 0 && fv.Reaches == 0,
+                Check(ss.State == ConnState.Disconnected && ss.Error == "Вставьте ссылку в настройках" && fb.Starts == 0 && fv.Reaches == 0,
                     "Session VLESS: пустая ссылка -> ошибка, sing-box не запускается");
             }
             {
@@ -2250,17 +2307,29 @@ sealed class FakeVless
     public readonly object Api = new();               // под lock (Api) — ApiPort/ApiSecret
     public int ApiPort;
     public string? ApiSecret;
+    public JsonObject? LastProxy;
     public readonly VlessDeps Deps;
 
+    // «Разбор» ссылки без движка: адрес и порт из Uri, тип по схеме
+    public static Server FakeServer(string link)
+    {
+        var u = new Uri(link);
+        var o = new JsonObject { ["type"] = u.Scheme == "hysteria2" ? "hysteria2" : "vless", ["server"] = u.Host, ["server_port"] = u.Port };
+        return new Server(u.Host, o, []);
+    }
+
     public FakeVless(string dir, Func<string, IPAddress?>? resolve = null, Func<IPAddress, int, string?>? reach = null,
-        Func<IReadOnlyList<string>, ListsResult>? lists = null, Func<int, string, CancellationToken, string?>? afterStart = null)
+        Func<IReadOnlyList<string>, ListsResult>? lists = null, Func<int, string, CancellationToken, string?>? afterStart = null,
+        Func<string, (Server?, string?)>? decode = null)
     {
         Deps = new VlessDeps
         {
+            Decode = decode ?? (l => (FakeServer(l), null)),
             Resolve = host => { Interlocked.Increment(ref Resolves); return resolve?.Invoke(host); },
             Reach = (ip, port) => { Interlocked.Increment(ref Reaches); return reach?.Invoke(ip, port); },
-            PrepareLists = (ids, _, _) =>
+            PrepareLists = (ids, proxy) =>
             {
+                LastProxy = proxy;
                 Interlocked.Increment(ref Prepares);
                 lock (Prepared)
                 {

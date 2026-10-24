@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json.Nodes;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -56,14 +57,14 @@ namespace ViviTune
 
         // Как Prepare, но качает через VLESS-сервер (провайдер может резать или тормозить GitHub), не вышло — напрямую.
         // Временный sing-box (sb, без TUN) запускается, только если какой-то список надо скачать, и останавливается здесь же.
-        public static ListsResult PrepareVia(string dir, IReadOnlyList<string> ids, ISingBox sb, string vlessLink, IPAddress server, DateTime nowUtc)
+        public static ListsResult PrepareVia(string dir, IReadOnlyList<string> ids, ISingBox sb, JsonObject proxy, DateTime nowUtc)
         {
             Directory.CreateDirectory(dir);
             int port = Session.FreePort();
             var cfg = Path.Combine(dir, $"fetch-{port}.json"); // со своим портом: два вызова подряд не делят файл
             var tunnel = new Lazy<IWebProxy>(() => // исключение кэшируется: не поднялся — все списки сразу напрямую
             {
-                File.WriteAllText(cfg, ConfigBuilder.BuildFetch(vlessLink, server, port));
+                File.WriteAllText(cfg, ConfigBuilder.BuildFetch(proxy, port));
                 sb.Start(cfg);
                 for (var end = DateTime.UtcNow.AddSeconds(3); ; Thread.Sleep(50))
                     try { using var c = new TcpClient(); c.Connect(IPAddress.Loopback, port); break; }

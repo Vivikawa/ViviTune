@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net.Sockets;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace ViviTune
 {
@@ -100,13 +101,12 @@ namespace ViviTune
             return new object[] { tun };
         }
 
-        // server — уже разрешённый IP сервера VLESS; файлы правил (apps, sites, list-*) пишет RuleFiles.Write.
-        public static string BuildVless(Settings s, int apiPort, string apiSecret, IPAddress server, string rulesDir)
+        // proxy — ProxyOutbound, server — его IP; файлы правил (apps, sites, list-*) пишет RuleFiles.Write.
+        public static string BuildVless(Settings s, int apiPort, string apiSecret, JsonObject proxy, IPAddress server, string rulesDir)
         {
             var err = s.Validate();
             if (err != null) throw new InvalidOperationException(err);
             var cidr = server + (server.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32");
-            var proxy = VlessOutbound(s.VlessLink, server);
 
             // один набор на всё: каждый список каталога всегда в конфиге (выключенный — пустой файл)
             var sets = new List<object> { LocalSet(rulesDir, RuleFiles.Apps), LocalSet(rulesDir, RuleFiles.Sites) };
@@ -133,62 +133,29 @@ namespace ViviTune
 
         // Временный sing-box, чтобы скачать списки через VLESS-сервер (провайдер может резать GitHub):
         // только локальный HTTP/SOCKS-прокси на 127.0.0.1:port, без TUN — системный трафик не трогает.
-        public static string BuildFetch(string vlessLink, IPAddress server, int port) => JsonSerializer.Serialize(D(
+        public static string BuildFetch(JsonObject proxy, int port) => JsonSerializer.Serialize(D(
             "log", D("level", "warn"),
             "inbounds", new object[] { D("type", "mixed", "tag", "in", "listen", "127.0.0.1", "listen_port", port) },
-            "outbounds", new object[] { VlessOutbound(vlessLink, server) }), Json.DictionaryStringObject);
+            "outbounds", new object[] { proxy.DeepClone() }), Json.DictionaryStringObject);
 
-        // Outbound "proxy" по ссылке vless:// к уже разрешённому IP сервера.
-        static Dictionary<string, object> VlessOutbound(string vlessLink, IPAddress server)
+        // Outbound "proxy" от движка: адрес — уже разрешённый IP сервера, поправки как у Hiddify (ray2sing).
+        public static JsonObject ProxyOutbound(Server s, IPAddress ip)
         {
-            var v = VlessServer.Parse(vlessLink, out var linkError) ?? throw new InvalidOperationException(linkError);
-            var proxy = D("type", "vless", "tag", "proxy", "server", server.ToString(), "server_port", v.Port, "uuid", v.Uuid);
-            if (!string.IsNullOrEmpty(v.Flow)) proxy["flow"] = v.Flow;
-            proxy["packet_encoding"] = "xudp";
-            if (v.Security != "none")
+            var o = (JsonObject)s.Outbound.DeepClone();
+            o["tag"] = "proxy";
+            o["server"] = ip.ToString();
+            if (s.Type == "vless" && !o.ContainsKey("packet_encoding")) o["packet_encoding"] = "xudp";
+            var tls = o["tls"] as JsonObject;
+            bool tlsOn = tls?["enabled"]?.GetValue<bool>() == true;
+            if (tlsOn && !tls!.ContainsKey("server_name") && !IPAddress.TryParse(s.Host, out _)) tls["server_name"] = s.Host;
+            if (o["transport"] is JsonObject tr && tr["type"]?.GetValue<string>() == "grpc")
             {
-                var tls = D("enabled", true);
-                if (!string.IsNullOrEmpty(v.Sni)) tls["server_name"] = v.Sni;
-                if (v.AllowInsecure) tls["insecure"] = true;
-                if (v.Alpn.Length > 0) tls["alpn"] = v.Alpn;
-                else if (v.Transport == "grpc") tls["alpn"] = new[] { "h2" }; // как Hiddify (ray2sing): gRPC — это HTTP/2
-                if (!string.IsNullOrEmpty(v.Fingerprint)) tls["utls"] = D("enabled", true, "fingerprint", v.Fingerprint);
-                if (v.Security == "reality")
-                {
-                    var re = D("enabled", true, "public_key", v.PublicKey ?? "");
-                    if (!string.IsNullOrEmpty(v.ShortId)) re["short_id"] = v.ShortId;
-                    tls["reality"] = re;
-                }
-                proxy["tls"] = tls;
+                if (tlsOn && !tls!.ContainsKey("alpn")) tls["alpn"] = new JsonArray("h2"); // gRPC — это HTTP/2
+                // ping HTTP/2 после 15 с тишины, нет ответа 15 с — новое соединение
+                if (!tr.ContainsKey("idle_timeout")) tr["idle_timeout"] = "15s";
+                if (!tr.ContainsKey("ping_timeout")) tr["ping_timeout"] = "15s";
             }
-            if (v.Transport != "tcp")
-            {
-                var tr = D("type", v.Transport);
-                bool host = !string.IsNullOrEmpty(v.HostHeader), path = !string.IsNullOrEmpty(v.Path);
-                switch (v.Transport)
-                {
-                    case "ws":
-                        if (path) tr["path"] = v.Path!;
-                        if (host) tr["headers"] = D("Host", v.HostHeader!);
-                        break;
-                    case "grpc":
-                        if (!string.IsNullOrEmpty(v.ServiceName)) tr["service_name"] = v.ServiceName;
-                        // как Hiddify (ray2sing): ping HTTP/2 после 15 с тишины, нет ответа 15 с — новое соединение
-                        tr["idle_timeout"] = "15s";
-                        tr["ping_timeout"] = "15s";
-                        break;
-                    case "httpupgrade":
-                        if (host) tr["host"] = v.HostHeader!;
-                        if (path) tr["path"] = v.Path!;
-                        break;
-                    default: // http
-                        if (host) tr["host"] = new object[] { v.HostHeader! };
-                        if (path) tr["path"] = v.Path!;
-                        break;
-                }
-                proxy["transport"] = tr;
-            }
-            return proxy;
+            return o;
         }
     }
 }
