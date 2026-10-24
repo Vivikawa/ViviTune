@@ -79,10 +79,12 @@ namespace ViviTune.Ui
                 catch (Exception) { return r; } // не вышло и так: ошибка прямой попытки
                 finally { try { File.Delete(cfg); } catch { } } // в нём ключ VLESS
             }
+            // сначала IPv4; исключения ловит вызывающий
+            static System.Net.IPAddress? Resolve(string name) =>
+                System.Net.Dns.GetHostAddresses(name).OrderBy(a => a.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork).FirstOrDefault();
             var session = new Session(settings, runner, Path.Combine(dir, "config.json"), ProxyProbe.Probe, TimeSpan.FromSeconds(1), new VlessDeps
             {
-                // сначала IPv4; исключения ловит Session
-                Resolve = name => System.Net.Dns.GetHostAddresses(name).OrderBy(a => a.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork).FirstOrDefault(),
+                Resolve = Resolve, // исключения ловит Session
                 Reach = ProxyProbe.Reach,
                 Decode = link => (Links.Decode(link, engine, out var e), e),
                 PrepareLists = (ids, proxy) =>
@@ -107,17 +109,41 @@ namespace ViviTune.Ui
                 DirectPort = settings.DirectPort,
                 SettingsError = Settings.ValidateProxy(settings.Ip, settings.Port) ?? Settings.ValidateDirectPort(settings.DirectPort, settings.Port),
                 ListRunning = exclude => ProcessCatalog.Running(exclude).Select(a => (a.Path, a.Name, a.Background)),
-                IconPng = ProcessCatalog.IconPng
+                IconPng = ProcessCatalog.IconPng,
+                AutoServer = settings.AutoServer
             };
 
             // Сводку по ссылке даёт движок (~70 мс): не в UI-потоке. Поле шлёт ссылку на каждый символ —
             // разбираем только последнюю, через 300 мс тишины
+            // Подписка: серверы и сводка из subscription.json (без движка); файл читаем не в UI-потоке
+            SubCache? subCache = null; // только UI-поток
+            void LoadSub(string link)
+            {
+                subCache = null;
+                state.SetSubError(null);
+                state.SetServers([], null);
+                state.SetSubInfo(null, null, DateTime.UtcNow);
+                if (!state.IsSubscription) return;
+                Task.Run(() =>
+                {
+                    var c = SubStore.Load(subPath, link);
+                    Dispatcher.UIThread.Post(() => { if (state.VlessLink == link) ShowSub(c); });
+                });
+            }
+            void ShowSub(SubCache? c)
+            {
+                subCache = c;
+                if (c == null) return;
+                state.SetServers(c.Servers, settings.Server);
+                state.SetSubInfo(c.Info, c.FetchedUtc, DateTime.UtcNow);
+            }
             CancellationTokenSource? decodeCts = null;
             void SetVless(string link)
             {
                 state.SetVless(link);
                 decodeCts?.Cancel();
-                if (string.IsNullOrWhiteSpace(link)) return;
+                LoadSub(link);
+                if (string.IsNullOrWhiteSpace(link) || state.IsSubscription) return;
                 var cts = decodeCts = new CancellationTokenSource();
                 Task.Run(async () =>
                 {
@@ -244,13 +270,130 @@ namespace ViviTune.Ui
                 if (devLog == null || !LogFile.IsVerbose(line)) Dispatcher.UIThread.Post(() => state.AddLog(line));
             };
             // выбранный сервер подписки запоминаем (при автовыборе и ручном переключении); AppsChanged не нужен
-            session.ServerChanged += key => Dispatcher.UIThread.Post(() => { settings.Server = key; Save(); });
+            // Сохраняем session.CurrentServer, а не аргумент: событие от подключения может прийти после быстрого ручного выбора
+            session.ServerChanged += _ => Dispatcher.UIThread.Post(() =>
+            {
+                if (session.CurrentServer is not { } cur) return;
+                settings.Server = cur;
+                Save();
+                state.SetSelected(cur);
+            });
+            session.PingsChanged += () => Dispatcher.UIThread.Post(() =>
+            {
+                foreach (var kv in session.Pings) state.SetPing(kv.Key, kv.Value);
+            });
             session.Speed += s => Dispatcher.UIThread.Post(() => state.PushSpeed(s));
+
+            // ---- подписка: получить серверы, пинг, выбор, галка ----
+            CancellationTokenSource? pingCts = null; // пинг временным sing-box: подключение его отменяет
+            // Пинг без подключения: один временный sing-box с outbound'ами всех поддерживаемых серверов; не в UI-потоке
+            void PingOffline(IReadOnlyList<SubServer> servers, CancellationToken ct)
+            {
+                var tags = new List<string>(); var keys = new Dictionary<string, string>(); var outs = new List<System.Text.Json.Nodes.JsonObject>();
+                foreach (var sv in servers.Where(x => x.Server != null))
+                {
+                    System.Net.IPAddress? ip = null;
+                    try { ip = System.Net.IPAddress.TryParse(sv.Server!.Host, out var lit) ? lit : Resolve(sv.Server.Host); } catch (Exception) { }
+                    if (ip == null) { Dispatcher.UIThread.Post(() => state.SetPing(sv.Key, null)); continue; }
+                    var o = ConfigBuilder.ProxyOutbound(sv.Server!, ip);
+                    var tag = "s" + outs.Count;
+                    o["tag"] = tag;
+                    outs.Add(o); tags.Add(tag); keys[tag] = sv.Key;
+                }
+                if (outs.Count == 0 || ct.IsCancellationRequested) return;
+                int apiPort = Session.FreePort();
+                var secret = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+                var cfg = Path.Combine(dir, $"probe-{apiPort}.json");
+                using var sb = new Runner(Path.Combine(dir, "sing-box.exe")); // Job Object: умрёт вместе с нами
+                try
+                {
+                    File.WriteAllText(cfg, ConfigBuilder.BuildProbe(outs, apiPort, secret));
+                    sb.Start(cfg);
+                    for (var end = DateTime.UtcNow.AddSeconds(3); ; Thread.Sleep(50))
+                        try { using var c = new System.Net.Sockets.TcpClient(); c.Connect(System.Net.IPAddress.Loopback, apiPort); break; }
+                        catch (System.Net.Sockets.SocketException) when (DateTime.UtcNow < end) { }
+                    using var api = new ClashApi(apiPort, secret);
+                    Pinger.Ping(api, tags, 3000, null, (t, ms) => { if (!ct.IsCancellationRequested) Dispatcher.UIThread.Post(() => state.SetPing(keys[t], ms)); }, ct);
+                }
+                finally
+                {
+                    sb.Stop();
+                    try { File.Delete(cfg); } catch { } // в нём ключи
+                }
+            }
+            // Пинг всех серверов: подключено — через сессию, иначе временным sing-box. Одновременно только один (Pinging).
+            void StartPing()
+            {
+                if (state.Pinging || state.Fetching || subCache == null) return;
+                var servers = subCache.Servers;
+                state.Pinging = true;
+                foreach (var r in state.Servers.Where(r => r.Supported)) state.SetPinging(r.Key);
+                pingCts?.Cancel();
+                var cts = pingCts = new CancellationTokenSource();
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        if (!session.PingConnected(cts.Token) && session.State == ConnState.Disconnected) PingOffline(servers, cts.Token);
+                    }
+                    catch (Exception e) { Dispatcher.UIThread.Post(() => state.AddLog("Пинг серверов: " + e.Message)); }
+                    Dispatcher.UIThread.Post(() => state.Pinging = false);
+                });
+            }
+            state.PingRequested += StartPing;
+            state.FetchServersRequested += () =>
+            {
+                if (!state.CanFetchNow) return;
+                var link = state.VlessLink;
+                var old = subCache;
+                state.Fetching = true;
+                state.SetSubError(null);
+                Task.Run(() =>
+                {
+                    var r = FetchSub(link, old);
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        state.Fetching = false;
+                        if (state.VlessLink != link) return; // поле уже другое
+                        if (r.Cache == null) { state.SetSubError(r.Error ?? "Подписка не скачалась"); return; }
+                        ShowSub(r.Cache);
+                        StartPing();
+                    });
+                });
+            };
+            var selectChain = Task.CompletedTask; // выбор сервера по одному, не в UI-потоке
+            state.SelectServerRequested += key =>
+            {
+                settings.Server = key;
+                Save();
+                state.SetSelected(key);
+                if (session.State != ConnState.Connected) return;
+                selectChain = selectChain.ContinueWith(_ =>
+                {
+                    bool ok;
+                    try { ok = session.SelectServer(key); } catch (Exception) { ok = false; }
+                    if (ok) return;
+                    // не вышло: возвращаем то, что реально выбрано
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        if (session.CurrentServer is not { } cur) return;
+                        settings.Server = cur; Save(); state.SetSelected(cur);
+                    });
+                }, TaskScheduler.Default);
+            };
+            state.SetAutoServerRequested += on =>
+            {
+                settings.AutoServer = on;
+                Save();
+                session.AutoServer = on;
+                state.AutoServer = on;
+            };
 
             CancellationTokenSource? auto = null; // попытки подключения при автозапуске
             state.ToggleRequested += async () =>
             {
                 auto?.Cancel(); // пользователь решил сам: попытки автозапуска больше не нужны
+                if (session.State == ConnState.Disconnected) pingCts?.Cancel(); // пинг временным sing-box не мешает подключению
                 try
                 {
                     if (session.State == ConnState.Disconnected) await session.ConnectAsync();

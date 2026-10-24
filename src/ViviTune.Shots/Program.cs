@@ -103,6 +103,23 @@ s.DetailText = "";
 s.DirectTab = true;
 Shot(NavPage.Apps, "apps-sites.png");
 Shot(NavPage.Settings, "settings-vless.png");
+// Подписка: 5 серверов (один серый), пинги трёх цветов
+s.SetVless("https://sub.example.com/abc123");
+s.AutoServer = true;
+Server Srv(string n) => new(n, System.Text.Json.Nodes.JsonNode.Parse("{\"type\":\"vless\",\"server\":\"h.example.com\",\"server_port\":443}")!.AsObject(), []);
+s.SetServers([
+    new("NL|a:443", "🇳🇱 Нидерланды", Srv("a"), null),
+    new("DE|b:443", "🇩🇪 Германия #2", Srv("b"), null),
+    new("FI|c:443", "🇫🇮 Финляндия #3", Srv("c"), null),
+    new("IT|d:443", "🇮🇹 Италия", Srv("d"), null),
+    new("M|-", "🇳🇱 Мобильный #1", null, "не поддерживается: hysteria")], "DE|b:443");
+s.SetPing("NL|a:443", 48); s.SetPing("DE|b:443", 61); s.SetPing("FI|c:443", 142); s.SetPing("IT|d:443", null);
+var now = DateTime.UtcNow;
+s.SetSubInfo(new SubInfo("StressKVN", 2, 2_254_857_830, 10_737_418_240, new DateTimeOffset(2026, 10, 27, 0, 0, 0, TimeSpan.Zero)), now.AddMinutes(-5), now);
+window.ShowPage(NavPage.Home); // страница настроек заполнит поле заново
+window.Height = 760;
+Shot(NavPage.Settings, "settings-subscription.png");
+window.Height = 600;
 s.Mode = ProxyMode.Socks5; // назад к SOCKS5 для снимка пустого списка
 s.DirectTab = false;
 s.State = ConnState.Disconnected;

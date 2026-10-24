@@ -44,6 +44,17 @@ namespace ViviTune.Ui
             if (sender is Avalonia.Controls.Primitives.ToggleButton t) (DataContext as ViewState)?.RequestSetAutostart(t.IsChecked == true);
         }
 
+        void OnFetch(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => (DataContext as ViewState)?.RequestFetchServers();
+        void OnPing(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => (DataContext as ViewState)?.RequestPing();
+        void OnPickServer(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            if (sender is Button { Tag: string key }) (DataContext as ViewState)?.RequestSelectServer(key);
+        }
+        void OnAutoServer(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            if (sender is Avalonia.Controls.Primitives.ToggleButton t) (DataContext as ViewState)?.RequestSetAutoServer(t.IsChecked == true);
+        }
+
         void PushVless()
         {
             if (DataContext is not ViewState s) return;

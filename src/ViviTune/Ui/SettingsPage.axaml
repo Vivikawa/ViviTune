@@ -8,8 +8,31 @@
     <Style Selector="Border.card.off">
       <Setter Property="Opacity" Value="0.55" />
     </Style>
+    <Style Selector="TextBlock.ping">
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+    </Style>
+    <Style Selector="Border.srv Button:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
     <Style Selector="TextBlock.ok">
       <Setter Property="Foreground" Value="{StaticResource OkBrush}" />
+    </Style>
+    <Style Selector="TextBlock.warn">
+      <Setter Property="Foreground" Value="{StaticResource WarnBrush}" />
+    </Style>
+    <Style Selector="Border.srv.sel">
+      <Setter Property="Background" Value="#1a2a3e" />
+      <Setter Property="BorderBrush" Value="#5522d3ee" />
+    </Style>
+    <Style Selector="Border.srv.off">
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
+    <Style Selector="Ellipse.radio">
+      <Setter Property="Stroke" Value="{StaticResource MutedBrush}" />
+    </Style>
+    <Style Selector="Ellipse.radio.sel">
+      <Setter Property="Stroke" Value="{StaticResource Accent1Brush}" />
+      <Setter Property="Fill" Value="{StaticResource Accent1Brush}" />
     </Style>
     <Style Selector="TextBlock.err">
       <Setter Property="Foreground" Value="{StaticResource ErrorBrush}" />
@@ -44,8 +67,48 @@
         <TextBlock Text="VLESS · для тех, у кого нет роутера с Podkop" FontWeight="SemiBold" Margin="0,8,0,0" />
         <Border Classes="card" Classes.off="{Binding !IsVless}">
           <StackPanel Spacing="6">
-            <TextBlock Classes="muted" Text="Ссылка" />
-            <TextBox Name="VlessBox" PlaceholderText="vless://, hysteria2://, trojan://…" IsEnabled="{Binding SettingsEditable}" />
+            <TextBlock Classes="muted" Text="Ссылка или подписка" />
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBox Name="VlessBox" PlaceholderText="vless://…, hysteria2://… или https://… (подписка)" IsEnabled="{Binding SettingsEditable}" />
+              <Button Grid.Column="1" Classes="primary" Content="Получить серверы" Margin="8,0,0,0" Click="OnFetch"
+                      IsVisible="{Binding IsSubscription}" IsEnabled="{Binding CanFetchNow}" />
+            </Grid>
+            <StackPanel Spacing="6" IsVisible="{Binding IsSubscription}">
+              <TextBlock Classes="muted" TextWrapping="Wrap" Margin="0,2,0,0" Text="{Binding SubInfoText}"
+                         IsVisible="{Binding SubInfoText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+              <TextBlock Classes="error" Text="{Binding SubError}"
+                         IsVisible="{Binding SubError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+              <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,4,0,2">
+                <TextBlock Text="Выбирать самый быстрый сервер" VerticalAlignment="Center" />
+                <ToggleButton Grid.Column="1" Theme="{StaticResource Switch}" VerticalAlignment="Center"
+                              IsChecked="{Binding AutoServer, Mode=OneWay}" Click="OnAutoServer"
+                              AutomationProperties.Name="Выбирать самый быстрый сервер" />
+                <Button Grid.Column="2" Classes="flat" Content="↻" FontSize="16" Margin="8,0,0,0" Click="OnPing"
+                        IsEnabled="{Binding CanPing}" ToolTip.Tip="Проверить серверы" AutomationProperties.Name="Проверить серверы" />
+              </Grid>
+              <ItemsControl ItemsSource="{Binding Servers}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="ui:ServerRow">
+                    <Border Classes="srv" Classes.sel="{Binding Selected}" Classes.off="{Binding !Supported}"
+                            BorderThickness="1" CornerRadius="7" Margin="0,1">
+                      <Button Classes="flat" Tag="{Binding Key}" IsEnabled="{Binding Supported}" Click="OnPickServer"
+                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="8,6">
+                        <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
+                          <Ellipse Classes="radio" Classes.sel="{Binding Selected}" Width="12" Height="12" StrokeThickness="2"
+                                   VerticalAlignment="Center" Margin="0,0,10,0" />
+                          <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="{StaticResource TextBrush}"
+                                     TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="2" Text="{Binding PingText}" FontSize="12" Margin="8,0,0,0" VerticalAlignment="Center" Classes="ping"
+                                     Classes.ok="{Binding IsOk}" Classes.warn="{Binding IsWarn}" Classes.err="{Binding IsBad}" />
+                          <TextBlock Grid.Row="1" Grid.Column="1" Classes="muted" FontSize="11" Text="{Binding Reason}"
+                                     IsVisible="{Binding HasReason}" TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                      </Button>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
             <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding VlessSummary}"
                        Classes.ok="{Binding !VlessLinkError}" Classes.err="{Binding VlessLinkError}"
                        IsVisible="{Binding VlessSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />

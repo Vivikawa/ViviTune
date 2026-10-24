@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -54,6 +55,9 @@ public sealed class ViewState : Observable
     public event Action<string, bool>? SetListEnabledRequested; // id списка
     public event Action<string>? AddSiteRequested, RemoveSiteRequested; // нормализованная запись
     public event Action<bool>? SetAutostartRequested;
+    public event Action? FetchServersRequested, PingRequested;
+    public event Action<string>? SelectServerRequested; // ключ сервера
+    public event Action<bool>? SetAutoServerRequested;
 
     // Есть ли задача автозапуска (ставит App). Уведомляет и без изменения: переключатель, который пользователь
     // щёлкнул, а задача не создалась или не удалилась, возвращается к настоящему значению.
@@ -88,7 +92,7 @@ public sealed class ViewState : Observable
                 upTotal = downTotal = 0;
                 Notify(nameof(UpTotalText), nameof(DownTotalText));
             }
-            Notify(nameof(StatusText), nameof(SettingsEditable), nameof(IsBusy), nameof(IsConnected));
+            Notify(nameof(StatusText), nameof(SettingsEditable), nameof(IsBusy), nameof(IsConnected), nameof(CanFetch), nameof(CanFetchNow));
         }
     }
 
@@ -113,7 +117,8 @@ public sealed class ViewState : Observable
     public string Ip { get => ip; set { if (Set(ref ip, value)) Notify(nameof(ProxyLabel)); } }
     public int Port { get => port; set { if (Set(ref port, value)) Notify(nameof(ProxyLabel)); } }
     public string ProxyLabel => IsVless
-        ? (vlessHost.Length > 0 ? "VLESS · " + vlessHost : "VLESS")
+        ? (IsSubscription ? SelectedName is { } n ? "VLESS · " + n : "VLESS"
+            : vlessHost.Length > 0 ? "VLESS · " + vlessHost : "VLESS")
         : $"SOCKS5 · {ip}:{port}";
     public string? SettingsError { get => settingsError; set => Set(ref settingsError, value); }
 
@@ -164,7 +169,81 @@ public sealed class ViewState : Observable
         VlessLink = link;
         VlessHost = "";
         VlessLinkError = false;
-        VlessSummary = string.IsNullOrWhiteSpace(link) ? "" : "Проверяю ссылку…";
+        bool sub = Settings.IsSubscription(link);
+        VlessSummary = sub || string.IsNullOrWhiteSpace(link) ? "" : "Проверяю ссылку…";
+        if (sub != IsSubscription)
+        {
+            isSubscription = sub;
+            Notify(nameof(IsSubscription), nameof(CanFetch), nameof(CanFetchNow), nameof(ProxyLabel));
+        }
+    }
+
+    // ---- подписка: список серверов в Настройках ----
+    bool isSubscription, fetching, pinging, autoServer;
+    string? subError;
+    string subInfoText = "";
+    public bool IsSubscription => isSubscription;
+    public bool CanFetch => isSubscription && SettingsEditable;
+    public bool Fetching { get => fetching; set { if (Set(ref fetching, value)) Notify(nameof(CanPing), nameof(CanFetchNow)); } }
+    public bool CanFetchNow => CanFetch && !fetching;
+    // идёт пинг: «↻» недоступна (два пинга не накладываются)
+    public bool Pinging { get => pinging; set { if (Set(ref pinging, value)) Notify(nameof(CanPing)); } }
+    public bool CanPing => !pinging && !fetching && Servers.Any(r => r.Supported);
+    public string SubInfoText { get => subInfoText; private set => Set(ref subInfoText, value); }
+    public string? SubError { get => subError; private set => Set(ref subError, value); }
+    public ObservableCollection<ServerRow> Servers { get; } = new();
+    // Уведомляет и без изменения (как Autostart): галка, которую App не принял, возвращается
+    public bool AutoServer { get => autoServer; set { autoServer = value; Notify(nameof(AutoServer)); } }
+    string? SelectedName => Servers.FirstOrDefault(r => r.Selected)?.Name;
+
+    public void SetServers(IReadOnlyList<SubServer> servers, string? selected)
+    {
+        Servers.Clear();
+        foreach (var s in servers)
+            Servers.Add(new ServerRow { Key = s.Key, Name = s.Name, Supported = s.Server != null, Reason = s.Server == null ? s.Error ?? "" : "", Selected = s.Server != null && s.Key == selected });
+        Notify(nameof(ProxyLabel), nameof(CanPing));
+    }
+    public void SetSelected(string key)
+    {
+        foreach (var r in Servers) r.Selected = r.Supported && r.Key == key;
+        Notify(nameof(ProxyLabel));
+    }
+    public void SetPing(string key, int? ms) => Servers.FirstOrDefault(r => r.Key == key)?.SetPing(ms);
+    public void SetPinging(string key) => Servers.FirstOrDefault(r => r.Key == key)?.SetPinging();
+    public void SetSubError(string? e) => SubError = string.IsNullOrEmpty(e) ? null : e;
+
+    // «StressKVN · 2,1 из 10,0 ГБ · до 27.10.2026 · обновлено 5 мин назад»
+    public void SetSubInfo(SubInfo? info, DateTime? fetchedUtc, DateTime nowUtc)
+    {
+        var parts = new List<string>();
+        if (info != null)
+        {
+            if (!string.IsNullOrEmpty(info.Title)) parts.Add(info.Title);
+            static string Gb(long b) => (b / 1073741824.0).ToString("0.0", CultureInfo.InvariantCulture).Replace('.', ',');
+            parts.Add(info.Total > 0 ? $"{Gb(info.Used)} из {Gb(info.Total)} ГБ" : Gb(info.Used) + " ГБ");
+            if (info.Expire is { } e) parts.Add($"до {e.Day:00}.{e.Month:00}.{e.Year}");
+        }
+        if (fetchedUtc is { } f)
+        {
+            var d = nowUtc - f;
+            parts.Add(d < TimeSpan.FromMinutes(1) ? "обновлено только что"
+                : d < TimeSpan.FromHours(1) ? $"обновлено {(int)d.TotalMinutes} мин назад"
+                : $"обновлено {(int)d.TotalHours} ч назад");
+        }
+        SubInfoText = string.Join(" · ", parts);
+    }
+
+    public void RequestFetchServers() => FetchServersRequested?.Invoke();
+    public void RequestPing() => PingRequested?.Invoke();
+    // неподдерживаемый сервер не выбирается
+    public void RequestSelectServer(string key)
+    {
+        if (Servers.FirstOrDefault(r => r.Key == key) is { Supported: true }) SelectServerRequested?.Invoke(key);
+    }
+    // Без изменений события нет: заполнение галки при старте не должно переписывать settings.json
+    public void RequestSetAutoServer(bool on)
+    {
+        if (on != autoServer) SetAutoServerRequested?.Invoke(on);
     }
 
     // Итог разбора: сервер и сводка под полем либо текст ошибки; устаревший разбор (ссылку уже сменили) игнорируется
@@ -358,6 +437,34 @@ public sealed class ViewState : Observable
         list.Add(value);
         while (list.Count > max) list.RemoveAt(0);
     }
+}
+
+public sealed class ServerRow : Observable
+{
+    bool selected;
+    string pingText = "", pingClass = "";
+    public string Key { get; init; } = "";
+    public string Name { get; init; } = "";
+    public bool Supported { get; init; } = true;
+    public string Reason { get; init; } = "";
+    public bool Selected { get => selected; set => Set(ref selected, value); }
+    public string PingText { get => pingText; private set => Set(ref pingText, value); }
+    // "ok" < 100 мс, "warn" остальное, "bad" — нет ответа; "" — не мерили, "…" — меряют
+    public string PingClass
+    {
+        get => pingClass;
+        private set { if (Set(ref pingClass, value)) Notify(nameof(IsOk), nameof(IsWarn), nameof(IsBad)); }
+    }
+    public bool IsOk => pingClass == "ok";
+    public bool IsWarn => pingClass == "warn";
+    public bool IsBad => pingClass == "bad";
+    public bool HasReason => Reason.Length > 0;
+    public void SetPing(int? ms)
+    {
+        PingText = ms == null ? "нет ответа" : ms + " мс";
+        PingClass = ms == null ? "bad" : ms < 100 ? "ok" : "warn";
+    }
+    public void SetPinging() { PingText = "…"; PingClass = "…"; }
 }
 
 public sealed class AppRow : Observable

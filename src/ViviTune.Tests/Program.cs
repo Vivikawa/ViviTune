@@ -48,7 +48,50 @@ static class Program
         SubscriptionTests();
         SubStoreTests();
         DevLogTests();
+        ViewStateSubTests();
         return failures == 0 ? 0 : 1;
+    }
+
+    static void ViewStateSubTests()
+    {
+        var now = new DateTime(2026, 10, 24, 12, 0, 0, DateTimeKind.Utc);
+        Server Srv(string n) => new(n, Obj(JsonNode.Parse("{\"type\":\"vless\",\"server\":\"h\",\"server_port\":443}")), []);
+        var servers = new List<SubServer>
+        {
+            new("A|h:443", "A", Srv("A"), null), new("B|h:443", "B", Srv("B"), null), new("C|h:443", "C", Srv("C"), null),
+            new("D|-", "D", null, "не поддерживается: vmess")
+        };
+        var v = new ViewState();
+        v.SetServers(servers, selected: "B|h:443");
+        Check(v.Servers.Count == 4 && v.Servers.Single(r => r.Selected).Key == "B|h:443" && !v.Servers[3].Supported && v.Servers[3].Reason == "не поддерживается: vmess", "строки серверов");
+        Check(v.Servers[0].PingClass == "", "не мерили — без класса");
+        v.SetPinging("A|h:443"); Check(v.Servers[0].PingClass == "…", "меряют");
+        v.SetPing("A|h:443", 48); v.SetPing("B|h:443", 142); v.SetPing("C|h:443", null);
+        Check(v.Servers[0].PingText == "48 мс" && v.Servers[0].PingClass == "ok" && v.Servers[1].PingClass == "warn" && v.Servers[2].PingText == "нет ответа" && v.Servers[2].PingClass == "bad", "пинги и цвета");
+        v.SetSubInfo(new SubInfo("StressKVN", 2, 2_254_857_830, 10_737_418_240, new DateTimeOffset(2026, 10, 27, 0, 0, 0, TimeSpan.Zero)), now.AddMinutes(-5), now);
+        Check(v.SubInfoText == "StressKVN · 2,1 из 10,0 ГБ · до 27.10.2026 · обновлено 5 мин назад", "строка подписки");
+        v.SetSubInfo(new SubInfo(null, 12, 120_000_000_000, 0, null), now, now);
+        Check(v.SubInfoText == "111,8 ГБ · обновлено только что", "без названия, лимита и срока");
+        v.SetSubInfo(new SubInfo(null, 12, 0, 0, null), now.AddHours(-3), now);
+        Check(v.SubInfoText == "0,0 ГБ · обновлено 3 ч назад", "часы");
+        int sel = 0; string? last = null; v.SelectServerRequested += k => { sel++; last = k; };
+        v.RequestSelectServer("D|-"); Check(sel == 0, "неподдерживаемый не выбирается");
+        v.RequestSelectServer("C|h:443"); Check(sel == 1 && last == "C|h:443", "поддерживаемый выбирается");
+        v.SetSelected("C|h:443"); Check(v.Servers.Single(r => r.Selected).Key == "C|h:443", "SetSelected");
+        v.SetVless("https://sub.example/x");
+        Check(v.IsSubscription && v.CanFetch, "подписка: можно получить серверы");
+        v.State = ConnState.Connected; Check(!v.CanFetch, "при подключении получать нельзя");
+        v.State = ConnState.Disconnected;
+        v.Mode = ProxyMode.Vless; v.SetSelected("B|h:443");
+        Check(v.ProxyLabel == "VLESS · B", "Главная: имя выбранного сервера");
+        v.SetVless("vless://x@h:1"); Check(!v.IsSubscription, "одиночная ссылка — не подписка");
+        // авто-галка: уведомляет и без изменения; событие только при изменении
+        int ev = 0, notes = 0; v.SetAutoServerRequested += _ => ev++;
+        v.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ViewState.AutoServer)) notes++; };
+        v.AutoServer = true; v.AutoServer = true;
+        v.RequestSetAutoServer(true); v.RequestSetAutoServer(false);
+        Check(notes == 2 && ev == 1, "AutoServer: уведомление без изменения, событие только по изменению");
+        v.Pinging = true; Check(!v.CanPing, "пока пинг идёт, ↻ недоступна");
     }
 
     static void DevLogTests()
