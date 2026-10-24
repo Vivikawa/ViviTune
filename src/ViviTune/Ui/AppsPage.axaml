@@ -87,7 +87,8 @@
           <StackPanel Spacing="6">
             <TextBlock Classes="lab" Text="Свои сайты" Margin="2,6,0,0" />
             <Grid ColumnDefinitions="*,Auto">
-              <TextBox Name="SiteInput" PlaceholderText="Домен или IP, например example.com" FontSize="13" />
+              <TextBox Name="SiteInput" PlaceholderText="Домен или IP, например example.com" FontSize="13"
+                       AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="110" />
               <Button Name="SiteAddButton" Grid.Column="1" Classes="primary" Content="Добавить" Margin="8,0,0,0" />
             </Grid>
             <TextBlock Classes="warning" FontSize="13" TextWrapping="Wrap" Text="{Binding SiteError}"

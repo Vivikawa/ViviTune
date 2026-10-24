@@ -27,7 +27,14 @@ namespace ViviTune.Ui
             AddPopup.Opened += (_, _) => SearchBox.Focus();
             AddButton.Click += (_, _) => OpenAddPanel();
             SiteAddButton.Click += (_, _) => AddSite();
-            SiteInput.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) AddSite(); };
+            // Enter добавляет, Shift+Enter — новая строка
+            SiteInput.KeyDown += (_, e) =>
+            {
+                if (e.Key != Avalonia.Input.Key.Enter || e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Shift)) return;
+                e.Handled = true;
+                AddSite();
+            };
+            SiteInput.TextChanged += (_, _) => { if (!settingSiteText) State?.ClearSiteError(); };
             PickFileButton.Click += (_, _) => PickFile();
             SearchBox.TextChanged += (_, _) =>
             {
@@ -147,9 +154,15 @@ namespace ViviTune.Ui
             if (sender is Control { DataContext: AppRow r } && removeGuard.TryAccept(Environment.TickCount64)) State?.RequestRemoveApp(r.Path);
         }
 
+        bool settingSiteText;
+
         void AddSite()
         {
-            if (State?.RequestAddSite(SiteInput.Text ?? "") == true) SiteInput.Text = "";
+            if (State == null) return;
+            var left = State.RequestAddSites(SiteInput.Text ?? "");
+            settingSiteText = true; // ошибка относится к оставшемуся тексту, правкой не считается
+            SiteInput.Text = left;
+            settingSiteText = false;
         }
 
         void OnRemoveSite(object? sender, RoutedEventArgs e)

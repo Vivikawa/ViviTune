@@ -43,7 +43,7 @@
     <TextBlock Classes="title" Text="Настройки" />
     <ScrollViewer Grid.Row="1" Margin="0,14,0,0" HorizontalAlignment="Left" VerticalAlignment="Top">
       <StackPanel Width="460" Spacing="8" Margin="0,0,12,0">
-        <TextBlock Text="SOCKS5 · роутер с Podkop" FontWeight="SemiBold" />
+        <TextBlock Text="SOCKS5" FontWeight="SemiBold" />
         <!-- Блок неактивного режима бледнее, но поля остаются редактируемыми -->
         <Border Classes="card" Classes.off="{Binding IsVless}">
           <StackPanel Spacing="12">
@@ -64,7 +64,7 @@
                        Text="Мимо Podkop — Mixed-порт отдельной секции Podkop, инструкция в README." />
           </StackPanel>
         </Border>
-        <TextBlock Text="VLESS · для тех, у кого нет роутера с Podkop" FontWeight="SemiBold" Margin="0,8,0,0" />
+        <TextBlock Text="VLESS" FontWeight="SemiBold" Margin="0,8,0,0" />
         <Border Classes="card" Classes.off="{Binding !IsVless}">
           <StackPanel Spacing="6">
             <TextBlock Classes="muted" Text="Ссылка или подписка" />

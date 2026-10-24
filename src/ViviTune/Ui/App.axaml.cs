@@ -228,7 +228,11 @@ namespace ViviTune.Ui
                 state.SyncSites(sites);
                 QueueAppsChanged();
             }
-            state.AddSiteRequested += v => { if (!settings.Sites.Contains(v)) ChangeSites([.. settings.Sites, v]); };
+            state.AddSitesRequested += list =>
+            {
+                var fresh = list.Where(v => !settings.Sites.Contains(v)).ToList();
+                if (fresh.Count > 0) ChangeSites([.. settings.Sites, .. fresh]);
+            };
             state.RemoveSiteRequested += v => { if (settings.Sites.Contains(v)) ChangeSites(settings.Sites.Where(x => x != v).ToList()); };
             state.AddAppRequested += (path, toDirect) => ChangeApps((p, d) => toDirect ? AppListOps.Move(d, p, path) : AppListOps.Move(p, d, path));
             // Путь может быть в любом из списков: без короткого замыкания (| вместо ||), чтобы затронуть оба

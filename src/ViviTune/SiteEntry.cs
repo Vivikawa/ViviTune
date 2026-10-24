@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Net;
@@ -11,6 +12,10 @@ namespace ViviTune
     {
         const string Whole = "Введите адрес целиком, например example.com";
         const string Bad = "Это не домен и не IP-адрес";
+
+        // Записи через пробелы, переводы строк, «,» и «;»
+        public static IReadOnlyList<string> Split(string text) =>
+            (text ?? "").Split([',', ';', ' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
 
         // Нормализованная запись или null + текст ошибки.
         public static string? Parse(string input, out string? error)

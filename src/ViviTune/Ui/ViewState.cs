@@ -53,7 +53,8 @@ public sealed class ViewState : Observable
     public event Action<ProxyMode>? SetModeRequested;
     public event Action<string>? SetVlessRequested; // ссылка
     public event Action<string, bool>? SetListEnabledRequested; // id списка
-    public event Action<string>? AddSiteRequested, RemoveSiteRequested; // нормализованная запись
+    public event Action<IReadOnlyList<string>>? AddSitesRequested; // нормализованные новые записи
+    public event Action<string>? RemoveSiteRequested;
     public event Action<bool>? SetAutostartRequested;
     public event Action? FetchServersRequested, PingRequested;
     public event Action<string>? SelectServerRequested; // ключ сервера
@@ -284,15 +285,28 @@ public sealed class ViewState : Observable
         Notify(nameof(DirectTabText));
     }
 
-    // true — запись принята (страница очищает ввод); пустой ввод — не ошибка
-    public bool RequestAddSite(string text)
+    public void ClearSiteError() => SiteError = null;
+
+    // Добавляет всё верное разом; возвращает текст, который остаётся в поле (неверные записи по строкам)
+    public string RequestAddSites(string text)
     {
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        var entry = SiteEntry.Parse(text, out var error);
-        if (entry == null) { SiteError = error; return false; }
-        SiteError = null;
-        AddSiteRequested?.Invoke(entry);
-        return true;
+        var added = new List<string>();
+        var bad = new List<string>();
+        string? firstError = null;
+        foreach (var token in SiteEntry.Split(text))
+        {
+            var entry = SiteEntry.Parse(token, out var error);
+            if (entry == null) { bad.Add(token); firstError ??= error; }
+            else if (!added.Contains(entry) && !Sites.Any(r => r.Value == entry)) added.Add(entry);
+        }
+        SiteError = bad.Count switch
+        {
+            0 => null,
+            1 => firstError,
+            _ => $"Не добавлено: {bad.Count} — это не домены и не IP-адреса",
+        };
+        if (added.Count > 0) AddSitesRequested?.Invoke(added);
+        return string.Join("\n", bad);
     }
     public void RequestRemoveSite(string value) => RemoveSiteRequested?.Invoke(value);
 
