@@ -41,6 +41,7 @@ static class Program
         AutostartTests();
         LinksTests();
         SubscriptionTests();
+        SubStoreTests();
         DevLogTests();
         return failures == 0 ? 0 : 1;
     }
@@ -447,6 +448,51 @@ static class Program
             if (c > 0) h[l[..c].Trim()] = l[(c + 1)..].Trim();
         }
         return (h, string.Join("\n", lines.Skip(i + 1)));
+    }
+
+    static void SubStoreTests()
+    {
+        var NoHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var (xuiHeaders, xuiBody) = Fixture("3x-ui");
+        var (lichnyHtmlHeaders, lichnyHtmlBody) = Fixture("lichny-html");
+        var (lichnyHeaders, lichnyBody) = Fixture("lichny-xray");
+        // UA: первый — ViviTune/x.y.z, после HTML — Happ/3.5.0
+        var uas = new List<string>();
+        var p = SubStore.Fetch(ua => { uas.Add(ua); return ua.StartsWith("Happ/") ? (200, lichnyHeaders, lichnyBody) : (200, lichnyHtmlHeaders, lichnyHtmlBody); }, out var e);
+        Check(e == null && p!.Entries.Count == 4 && uas.Count == 2 && uas[0].StartsWith("ViviTune/") && uas[1] == "Happ/3.5.0", "Fetch: HTML -> повтор как Happ");
+        Check(SubStore.Fetch(_ => (200, xuiHeaders, xuiBody), out _) != null, "Fetch: 3x-ui с первого раза");
+        Check(SubStore.Fetch(_ => (404, NoHeaders, ""), out e) == null && e == "Подписка не скачалась: HTTP 404", "Fetch: HTTP 404");
+        Check(SubStore.Fetch(_ => throw new HttpRequestException("нет сети"), out e) == null && e == "Подписка не скачалась: нет сети", "Fetch: сеть");
+        Check(SubStore.Fetch(_ => null, out e) == null && e != null && e.StartsWith("Подписка не скачалась: "), "Fetch: get вернул null");
+        Check(SubStore.Fetch(_ => (200, lichnyHtmlHeaders, lichnyHtmlBody), out e) == null && e == "Это не подписка", "Fetch: HTML и у Happ — ошибка разбора");
+        // ключи
+        var info = new SubInfo("T", 12, 5, 100, DateTimeOffset.FromUnixTimeSeconds(1793106853));
+        var parse = new SubParse(info, [new("АВТО", "vless://a"), new("АВТО", "vless://b"), new("АВТО", "vless://c"), new("NL", "hysteria2://d")], [new("vm", "не поддерживается: vmess")], null);
+        var list = SubStore.Decode(parse, l => (new Server("x", Obj(JsonNode.Parse("{\"type\":\"vless\",\"server\":\"h.example.com\",\"server_port\":443}")), []), null));
+        Check(list.Select(s => s.Key).SequenceEqual(["АВТО|h.example.com:443", "АВТО|h.example.com:443 #2", "АВТО|h.example.com:443 #3", "NL|h.example.com:443", "vm|-"]), "ключи: повторы получают #2, #3");
+        Check(list[^1].Server == null && list[^1].Error == "не поддерживается: vmess", "неподдерживаемый — с причиной");
+        var bad = SubStore.Decode(new SubParse(info, [new("B", "vless://bad"), new("B", "vless://bad2")], [], null), _ => (null, "Ссылка не подходит: x"));
+        Check(bad[0].Server == null && bad[0].Error == "Ссылка не подходит: x" && bad[0].Key == "B|-" && bad[1].Key == "B|- #2", "движок отказал — серый с причиной");
+        // кэш: сохранить/загрузить, другой URL, битый файл
+        var dir = Path.Combine(Path.GetTempPath(), "vt-substore-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "subscription.json");
+            var path2 = Path.Combine(dir, "broken.json");
+            var now = new DateTime(2026, 10, 24, 12, 0, 0, DateTimeKind.Utc);
+            var cache = new SubCache("https://sub.example/x", now, info, list);
+            SubStore.Save(path, cache);
+            var back = SubStore.Load(path, cache.Url);
+            Check(back != null && back.Servers.Count == cache.Servers.Count && back.Servers[0].Server!.Outbound.ToJsonString() == cache.Servers[0].Server!.Outbound.ToJsonString() && back.Info == cache.Info, "кэш: туда и обратно");
+            Check(back != null && back.Servers.Select(s => s.Key).SequenceEqual(list.Select(s => s.Key)) && back.Servers[^1].Error == "не поддерживается: vmess" && back.FetchedUtc == now, "кэш: ключи, причины, время");
+            Check(!File.Exists(path + ".tmp"), "кэш: tmp убран");
+            Check(SubStore.Load(path, "https://other") == null, "кэш другой подписки не берётся");
+            Check(SubStore.Load(Path.Combine(dir, "none.json"), cache.Url) == null, "нет файла — null");
+            File.WriteAllText(path2, "{битый"); Check(SubStore.Load(path2, cache.Url) == null, "битый кэш — null");
+            Check(!SubStore.Stale(cache with { FetchedUtc = now.AddHours(-11) }, now) && SubStore.Stale(cache with { FetchedUtc = now.AddHours(-12) }, now), "Stale по интервалу (12 ч)");
+        }
+        finally { Directory.Delete(dir, true); }
     }
 
     static void SubscriptionTests()
