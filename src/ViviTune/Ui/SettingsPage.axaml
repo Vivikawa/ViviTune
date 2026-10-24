@@ -45,7 +45,7 @@
         <Border Classes="card" Classes.off="{Binding !IsVless}">
           <StackPanel Spacing="6">
             <TextBlock Classes="muted" Text="Ссылка" />
-            <TextBox Name="VlessBox" PlaceholderText="vless://…" IsEnabled="{Binding SettingsEditable}" />
+            <TextBox Name="VlessBox" PlaceholderText="vless://, hysteria2://, trojan://…" IsEnabled="{Binding SettingsEditable}" />
             <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding VlessSummary}"
                        Classes.ok="{Binding !VlessLinkError}" Classes.err="{Binding VlessLinkError}"
                        IsVisible="{Binding VlessSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />

@@ -158,13 +158,20 @@ public sealed class ViewState : Observable
     public bool VlessLinkError { get => vlessLinkError; private set => Set(ref vlessLinkError, value); }
     public IReadOnlyList<ListGroup> ListGroups { get; }
 
-    // Ссылка из Settings: сервер и сводка под полем, либо текст ошибки (пустая ссылка — без ошибки)
+    // Ссылка из Settings: пока движок не разобрал — «Проверяю ссылку…» (пустая — без сводки)
     public void SetVless(string link)
     {
         VlessLink = link;
-        var server = VlessServer.Parse(link, out var error);
+        VlessHost = "";
+        VlessLinkError = false;
+        VlessSummary = string.IsNullOrWhiteSpace(link) ? "" : "Проверяю ссылку…";
+    }
+
+    // Итог разбора: сервер и сводка под полем либо текст ошибки; устаревший разбор (ссылку уже сменили) игнорируется
+    public void SetVlessDecoded(string link, Server? server, string? error)
+    {
+        if (link != VlessLink) return;
         if (server != null) { VlessHost = server.Host; VlessSummary = "Сервер: " + server.Summary; VlessLinkError = false; }
-        else if (string.IsNullOrWhiteSpace(link)) { VlessHost = ""; VlessSummary = ""; VlessLinkError = false; }
         else { VlessHost = ""; VlessSummary = error ?? "Ссылка не разбирается"; VlessLinkError = true; }
     }
 

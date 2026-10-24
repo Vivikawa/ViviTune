@@ -29,13 +29,14 @@ namespace ViviTune.Ui
             var dir = AppContext.BaseDirectory;
             var settingsPath = Path.Combine(dir, "settings.json");
             var settings = Settings.Load(settingsPath);
+            var engine = Links.Engine(Path.Combine(dir, "sing-box.exe")); // decode-link: для Session и сводки в UI
             var runner = new Runner(Path.Combine(dir, "sing-box.exe"));
             var session = new Session(settings, runner, Path.Combine(dir, "config.json"), ProxyProbe.Probe, TimeSpan.FromSeconds(1), new VlessDeps
             {
                 // сначала IPv4; исключения ловит Session
                 Resolve = name => System.Net.Dns.GetHostAddresses(name).OrderBy(a => a.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork).FirstOrDefault(),
                 Reach = ProxyProbe.Reach,
-                Decode = link => (Links.Decode(link, Links.Engine(Path.Combine(dir, "sing-box.exe")), out var e), e),
+                Decode = link => (Links.Decode(link, engine, out var e), e),
                 PrepareLists = (ids, proxy) =>
                 {
                     using var fetch = new Runner(Path.Combine(dir, "sing-box.exe")); // Job Object: умрёт вместе с нами
@@ -58,7 +59,18 @@ namespace ViviTune.Ui
                 IconPng = ProcessCatalog.IconPng
             };
 
-            state.SetVless(settings.VlessLink);
+            // Сводку по ссылке даёт движок (~70 мс): не в UI-потоке
+            void SetVless(string link)
+            {
+                state.SetVless(link);
+                if (string.IsNullOrWhiteSpace(link)) return;
+                Task.Run(() =>
+                {
+                    var srv = Links.Decode(link, engine, out var e);
+                    Dispatcher.UIThread.Post(() => state.SetVlessDecoded(link, srv, e));
+                });
+            }
+            SetVless(settings.VlessLink);
             state.SyncLists(settings.Lists);
             state.SyncSites(settings.Sites);
 
@@ -189,7 +201,7 @@ namespace ViviTune.Ui
             {
                 if (session.State != ConnState.Disconnected) return;
                 settings.VlessLink = link;
-                state.SetVless(link);
+                SetVless(link);
                 Save();
             };
             state.SetProxyRequested += (ip, port, direct) =>

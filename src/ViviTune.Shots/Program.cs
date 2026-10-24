@@ -80,7 +80,13 @@ Shot(NavPage.Settings, "settings.png");
 // VLESS: главная при подключении, вкладка «Сайты», настройки
 s.State = ConnState.Disconnected;
 s.Mode = ProxyMode.Vless;
-s.SetVless("vless://3f1c2a9e-7b4d-4c1e-9a55-0d6f8e2b7c41@nl-amsterdam.example.com:443?security=reality&sni=www.microsoft.com&fp=chrome&pbk=Qk2yq3xN8fWv0m6T1sZp4aLr9uHcDe7oJbXgYiAn5Rw&sid=6a1b&type=tcp&flow=xtls-rprx-vision#Amsterdam");
+var vlessLink = "vless://3f1c2a9e-7b4d-4c1e-9a55-0d6f8e2b7c41@nl-amsterdam.example.com:443?security=reality&sni=www.microsoft.com&fp=chrome&pbk=Qk2yq3xN8fWv0m6T1sZp4aLr9uHcDe7oJbXgYiAn5Rw&sid=6a1b&type=tcp&flow=xtls-rprx-vision#Amsterdam";
+s.SetVless(vlessLink);
+// движка нет: сводка из выдуманного разбора
+s.SetVlessDecoded(vlessLink, new Server("Amsterdam", System.Text.Json.Nodes.JsonNode.Parse("""
+    {"type":"vless","server":"nl-amsterdam.example.com","server_port":443,"uuid":"3f1c2a9e-7b4d-4c1e-9a55-0d6f8e2b7c41","flow":"xtls-rprx-vision",
+     "tls":{"enabled":true,"server_name":"www.microsoft.com","reality":{"enabled":true,"public_key":"Qk2yq3xN8fWv0m6T1sZp4aLr9uHcDe7oJbXgYiAn5Rw","short_id":"6a1b"}}}
+    """)!.AsObject(), []), null);
 s.SyncLists(["russia_inside", "telegram", "google_ai"]);
 s.SyncSites(["example.com", "xn--80aswg.xn--p1ai"]);
 s.State = ConnState.Connected;
