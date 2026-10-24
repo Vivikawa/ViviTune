@@ -48,7 +48,7 @@ Content-Type: text/html; charset=utf-8
     <p>Подписка работает в приложениях <span class="apps">Happ</span> и <span class="apps">v2RayTun</span>.
         Установите одно из них и добавьте ссылку на подписку туда.</p>
     <p>This app is not supported. Please install <b>Happ</b> or <b>v2RayTun</b> and add your subscription link there.</p>
-    <a class="btn" href="https://info.ezcon4u.com">Инструкция по установке</a>
+    <a class="btn" href="https://info.example.com">Инструкция по установке</a>
 </div>
 </body>
 </html>

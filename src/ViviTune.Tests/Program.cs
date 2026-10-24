@@ -486,6 +486,12 @@ static class Program
         Check(en.Count == 2 && en[0].Name == "t" && en[0].Link == "trojan://pw@t.example.com:443?security=tls&type=ws&path=%2Fw&host=h.example.com&sni=s.example.com#t", "FromXray: trojan ws tls -> ссылка");
         Check(en.Count == 2 && en[1].Link == "hysteria2://auth@a:443?sni=s.example.com#hy", "FromXray: hysteria v2 -> hysteria2://");
         Check(Subscription.Parse(NoHeaders, "{\"a\":1}").Error == "Формат подписки не поддерживается", "JSON без outbounds");
+        Check(Subscription.Parse(NoHeaders, "[1]").Error != null && Subscription.Parse(NoHeaders, "[\"x\"]").Error != null, "JSON: массив не объектов -> ошибка, без исключения");
+        var odd = Subscription.Parse(NoHeaders, "[{\"routing\":\"x\",\"outbounds\":[{\"protocol\":\"trojan\",\"settings\":{\"address\":\"a\",\"port\":1,\"password\":\"p\"},\"streamSettings\":{\"network\":\"ws\",\"wsSettings\":{\"headers\":\"h\"}}}]}]");
+        Check(odd.Error == null && odd.Entries.Count == 1, "FromXray: routing/headers не объекты -> без исключения");
+        Check(Subscription.Parse(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["subscription-userinfo"] = "expire=99999999999999" }, "vless://u@h:1#a").Info.Expire == null, "expire огромный -> null, без исключения");
+        Check(Subscription.Parse(NoHeaders, "[{\"routing\":{\"balancers\":[{}]},\"outbounds\":[{\"protocol\":\"vless\"}]}]").Error == "Это не подписка"
+            && Subscription.Parse(NoHeaders, "{\"outbounds\":[{\"protocol\":\"freedom\"}]}").Error == "Это не подписка", "JSON без серверов -> Это не подписка");
     }
 
     static void LinksTests()

@@ -33,7 +33,7 @@ namespace ViviTune
                 catch (Exception) { return Fail(Unsupported); }
                 if (root == null || !HasOutbounds(root)) return Fail(Unsupported);
                 var (e, s) = FromXray(root);
-                return new SubParse(info, e, s, null);
+                return e.Count + s.Count == 0 ? Fail(NotSub) : new SubParse(info, e, s, null);
             }
             if (text.Contains("proxies:")) return Fail(Unsupported);
 
@@ -70,7 +70,7 @@ namespace ViviTune
                     case "expire": expire = n; break;
                 }
             }
-            return new SubInfo(title, interval, up + down, total, expire > 0 ? DateTimeOffset.FromUnixTimeSeconds(expire) : null);
+            return new SubInfo(title, interval, up + down, total, expire > 0 && expire <= 253402300799 ? DateTimeOffset.FromUnixTimeSeconds(expire) : null);
         }
 
         // Обычный и URL-safe base64, с «=» и без
@@ -106,7 +106,7 @@ namespace ViviTune
         }
 
         static bool HasOutbounds(JsonNode root) =>
-            root is JsonArray a ? a.Any(c => c?["outbounds"] is JsonArray) : root["outbounds"] is JsonArray;
+            root is JsonArray a ? a.Any(c => c is JsonObject o && o["outbounds"] is JsonArray) : root is JsonObject r && r["outbounds"] is JsonArray;
 
         // Конфиги Xray -> ссылки. Конфиг с balancers (группа «Auto») пропускается целиком
         public static (IReadOnlyList<SubEntry> Entries, IReadOnlyList<SubSkip> Skipped) FromXray(JsonNode root)
@@ -116,7 +116,8 @@ namespace ViviTune
             var configs = root is JsonArray arr ? arr.OfType<JsonNode>().ToList() : new List<JsonNode> { root };
             foreach (var cfg in configs)
             {
-                if (cfg["routing"]?["balancers"] is JsonArray { Count: > 0 }) continue;
+                if (cfg is not JsonObject) continue;
+                if (cfg["routing"] is JsonObject routing && routing["balancers"] is JsonArray { Count: > 0 }) continue;
                 if (cfg["outbounds"] is not JsonArray outs) continue;
                 var proxies = outs.OfType<JsonObject>().Where(o => Str(o["protocol"]) is not (null or "freedom" or "blackhole" or "dns" or "loopback")).ToList();
                 var remarks = Str(cfg["remarks"]);
@@ -206,7 +207,7 @@ namespace ViviTune
                 if (network is "ws" or "xhttp" or "httpupgrade")
                 {
                     Add("path", Str(ts?["path"]));
-                    Add("host", Str(ts?["host"]) ?? Str(ts?["headers"]?["Host"]));
+                    Add("host", Str(ts?["host"]) ?? Str((ts?["headers"] as JsonObject)?["Host"]));
                 }
                 if (network == "grpc")
                 {
