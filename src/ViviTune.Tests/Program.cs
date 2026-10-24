@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json.Nodes;
 using ViviTune;
 using ViviTune.Ui;
@@ -39,6 +40,7 @@ static class Program
         ViewStateVlessTests();
         AutostartTests();
         LinksTests();
+        SubscriptionTests();
         DevLogTests();
         return failures == 0 ? 0 : 1;
     }
@@ -430,6 +432,60 @@ static class Program
             if (File.Exists(cand)) return cand;
         }
         return null;
+    }
+
+    // Образец ответа сервера: «HTTP код», заголовки, пустая строка, тело
+    static (Dictionary<string, string> Headers, string Body) Fixture(string name)
+    {
+        var lines = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name + ".http")).Split('\n');
+        var h = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        int i = 1;
+        for (; i < lines.Length && lines[i].TrimEnd('\r') != ""; i++)
+        {
+            var l = lines[i].TrimEnd('\r');
+            int c = l.IndexOf(':');
+            if (c > 0) h[l[..c].Trim()] = l[(c + 1)..].Trim();
+        }
+        return (h, string.Join("\n", lines.Skip(i + 1)));
+    }
+
+    static void SubscriptionTests()
+    {
+        var NoHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var (xuiHeaders, xuiBody) = Fixture("3x-ui");
+        var (remnaHeaders, remnaBody) = Fixture("remnawave");
+        var (lichnyHtmlHeaders, lichnyHtmlBody) = Fixture("lichny-html");
+        var (lichnyHeaders, lichnyBody) = Fixture("lichny-xray");
+        var x = Subscription.Parse(xuiHeaders, xuiBody);
+        Check(x.Error == null && x.Entries.Count == 1 && x.Entries[0].Link.StartsWith("vless://") && x.Entries[0].Name == "selfsteal-Me", "Подписка 3x-ui: одна ссылка, имя из #");
+        Check(x.Info.Title == null && x.Info.IntervalHours == 12 && x.Info.Total == 0 && x.Info.Expire == null && x.Info.Used == 11357853496 + 109480578724, "Подписка 3x-ui: интервал 12, без лимита и срока, расход");
+        var r = Subscription.Parse(remnaHeaders, remnaBody);
+        Check(r.Info.Title == "StressKVN" && r.Info.IntervalHours == 2 && r.Info.Total == 10737418240 && r.Info.Expire == DateTimeOffset.FromUnixTimeSeconds(1793106853), "Подписка Remnawave: base64:-название, интервал, лимит, срок");
+        Check(r.Entries.Count == 15 && r.Entries.Count(e => e.Link.StartsWith("hysteria2://")) == 1 && r.Entries[0].Name == "🇪🇺 ⚡️ Быстрый | АВТО", "Подписка Remnawave: 15 ссылок с именами");
+        var h = Subscription.Parse(lichnyHtmlHeaders, lichnyHtmlBody);
+        Check(h.Error == "Это не подписка" && h.Entries.Count == 0, "HTML вместо подписки");
+        var j = Subscription.Parse(lichnyHeaders, lichnyBody);
+        Check(j.Error == null && j.Info.Title == "🛡 Личный VPN" && j.Info.IntervalHours == 1 && j.Entries.Count == 4, "Подписка JSON Xray: группа «Auto» пропущена, 4 сервера");
+        Check(j.Entries[2].Name == "🛡 Личный VPN | 81625687 🇩🇪 | 1" && j.Entries.All(e => e.Link.StartsWith("vless://") && e.Link.Contains("type=grpc") && e.Link.Contains("mode=multi") && e.Link.Contains("serviceName=kv") && e.Link.Contains("security=reality") && e.Link.Contains("pbk=")), "JSON Xray -> ссылки VLESS gRPC Reality");
+        Check(Subscription.Parse(NoHeaders, Convert.ToBase64String(Encoding.UTF8.GetBytes("vless://u@h:1#a\nvless://u@h:2#b")).TrimEnd('=')).Entries.Count == 2, "base64 без =");
+        Check(Subscription.Parse(NoHeaders, Convert.ToBase64String(Encoding.UTF8.GetBytes("vless://u@h:1?a=b>c#a")).Replace('+', '-').Replace('/', '_')).Entries.Count == 1, "URL-safe base64");
+        Check(Subscription.Parse(NoHeaders, "vless://u@h:1#a\r\ntrojan://p@h:2#b\r\n").Entries.Count == 2, "ссылки как есть");
+        Check(Subscription.Parse(NoHeaders, "").Error == "Это не подписка", "пустой ответ");
+        Check(Subscription.Parse(NoHeaders, "proxies:\n  - name: a\n").Error == "Формат подписки не поддерживается", "Clash YAML");
+        Check(Subscription.Parse(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["profile-title"] = "Просто имя" }, "vless://u@h:1#a").Info.Title == "Просто имя" && Subscription.Parse(NoHeaders, "vless://u@h:1#a").Info.IntervalHours == 12, "название без base64:, интервал по умолчанию 12");
+
+        var (en, sk) = Subscription.FromXray(JsonNode.Parse("""
+            [{"remarks":"v","outbounds":[{"protocol":"vmess","settings":{}},{"protocol":"freedom"}]},
+             {"remarks":"t","outbounds":[{"protocol":"trojan","settings":{"servers":[{"address":"t.example.com","port":443,"password":"pw"}]},
+               "streamSettings":{"network":"ws","security":"tls","wsSettings":{"path":"/w","headers":{"Host":"h.example.com"}},"tlsSettings":{"serverName":"s.example.com"}}}]},
+             {"remarks":"hy","outbounds":[{"protocol":"hysteria","settings":{"version":2,"address":"a","port":443},
+               "streamSettings":{"network":"hysteria","security":"tls","tlsSettings":{"serverName":"s.example.com"},"hysteriaSettings":{"version":2,"auth":"auth"}}}]},
+             {"remarks":"b","routing":{"balancers":[{"tag":"x"}]},"outbounds":[{"protocol":"vless","settings":{}}]}]
+            """)!);
+        Check(sk.Count == 1 && sk[0].Name == "v" && sk[0].Reason == "не поддерживается: vmess", "FromXray: vmess -> Skipped с причиной");
+        Check(en.Count == 2 && en[0].Name == "t" && en[0].Link == "trojan://pw@t.example.com:443?security=tls&type=ws&path=%2Fw&host=h.example.com&sni=s.example.com#t", "FromXray: trojan ws tls -> ссылка");
+        Check(en.Count == 2 && en[1].Link == "hysteria2://auth@a:443?sni=s.example.com#hy", "FromXray: hysteria v2 -> hysteria2://");
+        Check(Subscription.Parse(NoHeaders, "{\"a\":1}").Error == "Формат подписки не поддерживается", "JSON без outbounds");
     }
 
     static void LinksTests()
