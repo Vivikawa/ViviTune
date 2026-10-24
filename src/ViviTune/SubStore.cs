@@ -37,6 +37,21 @@ namespace ViviTune
             return last;
         }
 
+        public const string NoUsableServers = "В подписке нет серверов, которые ViviTune умеет";
+
+        // Скачать, разобрать и сохранить. Ответ без единого годного сервера не затирает рабочую копию (old): ошибка, на диск не пишем.
+        // save может бросить (папка недоступна для записи) — работаем без кэша на диске.
+        public static (SubCache? Cache, string? Error) Refresh(string url, Func<string, (int Status, IReadOnlyDictionary<string, string> Headers, string Body)?> get,
+            Func<string, (Server? Server, string? Error)> decode, SubCache? old, Action<SubCache> save, DateTime nowUtc)
+        {
+            var p = Fetch(get, out var error);
+            if (p == null) return (null, error);
+            var cache = new SubCache(url, nowUtc, p.Info, Decode(p, decode));
+            if (cache.Servers.All(s => s.Server == null) && old != null && old.Servers.Any(s => s.Server != null)) return (null, NoUsableServers);
+            try { save(cache); } catch (Exception) { }
+            return (cache, null);
+        }
+
         // Ключ = «имя|host:port»; повторы получают « #2», « #3»; неподдерживаемые — «имя|-». Порядок как в подписке
         public static IReadOnlyList<SubServer> Decode(SubParse p, Func<string, (Server? Server, string? Error)> decode)
         {

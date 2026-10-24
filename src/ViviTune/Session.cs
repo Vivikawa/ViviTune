@@ -127,7 +127,7 @@ public sealed class Session : IDisposable
     public event Action<string>? Log;
     public event Action<Speed>? Speed;
     public event Action<string>? ServerChanged; // ключ текущего сервера подписки (вне gate)
-    public event Action? PingsChanged;          // вне gate
+    public event Action<string>? PingsChanged;  // ключ сервера, чей пинг изменился; вне gate
     volatile bool autoServer;                   // галка «самый быстрый» сейчас; пока подключены, её меняет UI
     public bool AutoServer { get => autoServer; set { lock (gate) autoServer = value; } }
     public event Action<string, string?, int?>? ServerDown;   // (ключ текущего, ключ лучшего или null, его пинг); вне gate
@@ -751,7 +751,7 @@ public sealed class Session : IDisposable
                     if (watch != w || state != ConnState.Connected || !p.Keys.TryGetValue(tag, out var k)) return;
                     pings = new Dictionary<string, int?>(pings) { [k] = ms };
                 }
-                PingsChanged?.Invoke();
+                PingsChanged?.Invoke(p.Keys[tag]);
             });
         w.Down += (cur, best, ms) =>
         {
@@ -818,7 +818,7 @@ public sealed class Session : IDisposable
                     if (state != ConnState.Connected || epoch != e) return;
                     pings = new Dictionary<string, int?>(pings) { [p.Keys[tag]] = ms };
                 }
-                PingsChanged?.Invoke();
+                PingsChanged?.Invoke(p.Keys[tag]);
             }, ct);
         }
         finally { pingGate.Release(); }

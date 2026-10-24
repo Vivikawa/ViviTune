@@ -51,19 +51,14 @@ namespace ViviTune.Ui
                 catch (Exception e) when (e is not HttpRequestException and not TaskCanceledException) { throw new InvalidOperationException("ошибка запроса"); }
             }
             // Скачать подписку одним способом (прокси null — системный): кэш уже сохранён или текст ошибки
-            (SubCache? Cache, string? Error) FetchVia(string url, System.Net.IWebProxy? proxy)
-            {
-                var p = SubStore.Fetch(ua => HttpGet(url, ua, proxy), out var error);
-                if (p == null) return (null, error);
-                var cache = new SubCache(url, DateTime.UtcNow, p.Info, SubStore.Decode(p, l => (Links.Decode(l, engine, out var e), e)));
-                try { SubStore.Save(subPath, cache); } catch (Exception) { } // папка недоступна для записи: работаем без кэша на диске
-                return (cache, null);
-            }
+            // Без годных серверов не затирает рабочую копию old (SubStore.Refresh)
+            (SubCache? Cache, string? Error) FetchVia(string url, System.Net.IWebProxy? proxy, SubCache? old) =>
+                SubStore.Refresh(url, ua => HttpGet(url, ua, proxy), l => (Links.Decode(l, engine, out var e), e), old, c => SubStore.Save(subPath, c), DateTime.UtcNow);
             // Напрямую; не вышло и есть копия — через выбранный сервер из неё временным sing-box (как списки)
             (SubCache? Cache, string? Error) FetchSub(string url, SubCache? old)
             {
-                var r = FetchVia(url, null);
-                if (r.Cache != null || old == null) return r;
+                var r = FetchVia(url, null, old);
+                if (r.Cache != null || old == null || r.Error == SubStore.NoUsableServers) return r; // сервер ответил: через туннель то же самое
                 var srv = (old.Servers.FirstOrDefault(s => s.Server != null && s.Key == settings.Server) ?? old.Servers.FirstOrDefault(s => s.Server != null))?.Server;
                 if (srv == null) return r;
                 int port = Session.FreePort();
@@ -73,7 +68,7 @@ namespace ViviTune.Ui
                     var ip = System.Net.IPAddress.TryParse(srv.Host, out var lit) ? lit : System.Net.Dns.GetHostAddresses(srv.Host).First();
                     var proxy = ConfigBuilder.ProxyOutbound(srv, ip);
                     using var fetch = new Runner(Path.Combine(dir, "sing-box.exe"));
-                    try { return FetchVia(url, ListStore.StartTunnel(cfg, fetch, proxy, port)); }
+                    try { return FetchVia(url, ListStore.StartTunnel(cfg, fetch, proxy, port), old); }
                     finally { fetch.Stop(); }
                 }
                 catch (Exception) { return r; } // не вышло и так: ошибка прямой попытки
@@ -82,6 +77,8 @@ namespace ViviTune.Ui
             // сначала IPv4; исключения ловит вызывающий
             static System.Net.IPAddress? Resolve(string name) =>
                 System.Net.Dns.GetHostAddresses(name).OrderBy(a => a.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork).FirstOrDefault();
+            // Скачанное при подключении показываем в Настройках (задаётся ниже, когда есть state и ShowSub)
+            Action<string, SubCache>? subFetched = null;
             var session = new Session(settings, runner, Path.Combine(dir, "config.json"), ProxyProbe.Probe, TimeSpan.FromSeconds(1), new VlessDeps
             {
                 Resolve = Resolve, // исключения ловит Session
@@ -93,7 +90,12 @@ namespace ViviTune.Ui
                     return ListStore.PrepareVia(Path.Combine(dir, "lists"), ids, fetch, proxy, DateTime.UtcNow);
                 },
                 LoadSub = url => SubStore.Load(subPath, url),
-                FetchSub = FetchSub,
+                FetchSub = (url, old) =>
+                {
+                    var r = FetchSub(url, old);
+                    if (r.Cache != null) subFetched?.Invoke(url, r.Cache); // Post внутри: вызов из потока Session
+                    return r;
+                },
                 Api = (p, s) => new ClashApi(p, s),
                 AfterStart = (p, s, ct) => VlessProbe.AfterStart(p, s, ct, devLog == null ? null : devLog.Write) ?? Flush()
             });
@@ -137,6 +139,11 @@ namespace ViviTune.Ui
                 state.SetServers(c.Servers, settings.Server);
                 state.SetSubInfo(c.Info, c.FetchedUtc, DateTime.UtcNow);
             }
+            subFetched = (url, c) => Dispatcher.UIThread.Post(() => { if (state.IsSubUrl(url)) ShowSub(c); });
+            // «обновлено … назад» стареет и без новых данных
+            var subAgeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+            subAgeTimer.Tick += (_, _) => state.RefreshSubInfo(DateTime.UtcNow);
+            subAgeTimer.Start();
             CancellationTokenSource? decodeCts = null;
             void SetVless(string link)
             {
@@ -254,6 +261,7 @@ namespace ViviTune.Ui
             {
                 state.State = session.State;
                 if (!ServerAlert.DownStillValid(session.State)) CloseDownAlert();
+                state.RefreshSubInfo(DateTime.UtcNow);
                 state.ErrorText = session.Error;
                 state.WarningText = session.Warnings.Count > 0 ? string.Join("\n", session.Warnings) : null;
                 bool live = state.State is ConnState.Connected or ConnState.Restarting;
@@ -283,10 +291,11 @@ namespace ViviTune.Ui
                 Save();
                 state.SetSelected(cur);
             });
-            session.PingsChanged += () => Dispatcher.UIThread.Post(() =>
+            // только изменившийся ключ: остальные строки (на «…» во время «↻») не откатываются к прежним значениям
+            session.PingsChanged += key =>
             {
-                foreach (var kv in session.Pings) state.SetPing(kv.Key, kv.Value);
-            });
+                if (session.Pings.TryGetValue(key, out var ms)) Dispatcher.UIThread.Post(() => state.SetPing(key, ms));
+            };
             session.Speed += s => Dispatcher.UIThread.Post(() => state.PushSpeed(s));
 
             // ---- подписка: получить серверы, пинг, выбор, галка ----
@@ -343,7 +352,12 @@ namespace ViviTune.Ui
                 {
                     try
                     {
-                        if (!session.PingConnected(cts.Token) && session.State == ConnState.Disconnected) PingOffline(servers, cts.Token);
+                        if (session.PingConnected(cts.Token))
+                        {
+                            // сервера без разрешённого адреса в пинг не входили: «нет ответа», а не прежнее значение
+                            if (!cts.IsCancellationRequested) Dispatcher.UIThread.Post(state.MarkUnanswered);
+                        }
+                        else if (session.State == ConnState.Disconnected) PingOffline(servers, cts.Token);
                     }
                     catch (Exception e) { Dispatcher.UIThread.Post(() => state.AddLog("Пинг серверов: " + e.Message)); }
                     Dispatcher.UIThread.Post(() => { state.Pinging = false; state.ResetPinging(); });
@@ -425,7 +439,7 @@ namespace ViviTune.Ui
             state.SetVlessRequested += link =>
             {
                 if (session.State != ConnState.Disconnected) return;
-                if (settings.SetVlessLink(link)) try { File.Delete(subPath); } catch (Exception) { } // другое поле — чужой кэш и выбор
+                settings.SetVlessLink(link); // другое поле сбрасывает выбор; копия подписки остаётся (Load берёт только свой адрес)
                 SetVless(link);
                 Save();
             };
@@ -498,6 +512,8 @@ namespace ViviTune.Ui
             session.ServerDown += (cur, best, ms) => Dispatcher.UIThread.Post(() =>
             {
                 if (!ServerAlert.DownStillValid(session.State)) return; // пока ждали UI-поток, подключение кончилось
+                // без галки пинги watch почти не копятся: берём самый быстрый из показанных в списке (с галкой — их пинги только что не ответили)
+                if (best == null && !state.AutoServer && state.FastestKnown(cur) is { } fk) (best, ms) = (fk.Key, fk.Ms);
                 var t = ServerAlert.DownText(NameOf(cur), best == null ? null : NameOf(best), ms);
                 ShowAlert(new ServerAlert(t.Title, t.Text, t.Best,
                     best == null ? null : () => state.RequestSelectServer(best), // та же очередь, что у списка серверов

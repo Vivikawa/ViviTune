@@ -20,13 +20,13 @@ namespace ViviTune
     {
         public static readonly TimeSpan MaxAge = TimeSpan.FromDays(1);
 
-        public static ListsResult Prepare(string dir, IReadOnlyList<string> ids, Func<string, byte[]> download, DateTime nowUtc)
+        public static ListsResult Prepare(string dir, IReadOnlyList<string> ids, Func<string, byte[]> download, DateTime nowUtc, int parallelism = 6)
         {
             Directory.CreateDirectory(dir);
             var files = new ConcurrentDictionary<string, string>();
             var failed = new ConcurrentBag<string>();
             var stale = new ConcurrentBag<string>();
-            Parallel.ForEach(ids, new ParallelOptions { MaxDegreeOfParallelism = 6 }, id =>
+            Parallel.ForEach(ids, new ParallelOptions { MaxDegreeOfParallelism = parallelism }, id =>
             {
                 var path = Path.Combine(dir, id + ".srs");
                 bool exists = File.Exists(path);
@@ -69,7 +69,7 @@ namespace ViviTune
                 {
                     try { return Download(id, tunnel.Value); }
                     catch { return Download(id); }
-                }, nowUtc);
+                }, nowUtc, parallelism: 1); // к серверу строго по одному соединению
             }
             finally
             {

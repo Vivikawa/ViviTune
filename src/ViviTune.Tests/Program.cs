@@ -102,6 +102,33 @@ static class Program
         v.SetPing("A|h:443", 48); v.SetPinging("A|h:443"); v.SetPinging("B|h:443");
         v.ResetPinging();
         Check(v.Servers[0].PingText == "48 мс" && v.Servers[0].PingClass == "ok" && v.Servers[1].PingClass == "warn" && v.Servers[1].PingText == "142 мс", "ResetPinging: «…» возвращается к прежнему значению");
+        // M2: срок показывается по местному времени
+        var exp = new DateTimeOffset(2026, 10, 27, 23, 30, 0, TimeSpan.Zero);
+        var le = exp.ToLocalTime();
+        v.SetSubInfo(new SubInfo(null, 12, 0, 0, exp), now, now);
+        Check(v.SubInfoText == $"0,0 ГБ · до {le.Day:00}.{le.Month:00}.{le.Year} · обновлено только что", "срок подписки - по местному времени");
+        // I1: «обновлено …» пересчитывается без нового SetSubInfo
+        v.SetSubInfo(new SubInfo(null, 12, 0, 0, null), now, now);
+        v.RefreshSubInfo(now.AddMinutes(7));
+        Check(v.SubInfoText == "0,0 ГБ · обновлено 7 мин назад", "RefreshSubInfo пересчитывает возраст");
+        v.SetSubInfo(null, null, now); v.RefreshSubInfo(now.AddHours(5)); Check(v.SubInfoText == "", "RefreshSubInfo без подписки - пусто");
+        // I1: скачанная при подключении подписка показывается, только если поле всё ещё про неё
+        v.SetVless("https://sub.example/x");
+        Check(v.IsSubUrl("https://sub.example/x") && v.IsSubUrl(" https://sub.example/x ") && !v.IsSubUrl("https://sub.example/y"), "IsSubUrl: тот же адрес (с обрезкой пробелов)");
+        v.SetVless("vless://x@h:1"); Check(!v.IsSubUrl("vless://x@h:1"), "IsSubUrl: одиночная ссылка - нет");
+        // I3: самый быстрый из показанных пингов, кроме текущего
+        v.SetServers(servers, "A|h:443");
+        Check(v.FastestKnown("A|h:443") == null, "FastestKnown: пингов нет");
+        v.SetPing("A|h:443", 10); v.SetPing("B|h:443", 90); v.SetPing("C|h:443", 40); v.SetPing("D|-", 5);
+        var fk = v.FastestKnown("A|h:443");
+        Check(fk is { Key: "C|h:443", Ms: 40 }, "FastestKnown: быстрый из остальных, не текущий и не неподдерживаемый");
+        v.SetPing("C|h:443", null); v.SetPinging("B|h:443");
+        Check(v.FastestKnown("A|h:443") == null, "FastestKnown: «нет ответа» и «…» не берутся");
+        // M6: после подключённого «↻» строки без ответа (адрес не разрешился) - «нет ответа»
+        v.SetServers(servers, "A|h:443");
+        v.SetPing("B|h:443", 90); v.SetPinging("A|h:443"); v.SetPinging("B|h:443"); v.SetPinging("C|h:443"); v.SetPing("A|h:443", 20);
+        v.MarkUnanswered();
+        Check(v.Servers[0].PingText == "20 мс" && v.Servers[1].PingText == "нет ответа" && v.Servers[1].PingClass == "bad" && v.Servers[2].PingClass == "bad" && v.Servers[3].PingClass == "", "MarkUnanswered: «…» -> нет ответа, остальное не тронуто");
     }
 
     static void DevLogTests()
@@ -315,6 +342,19 @@ static class Program
                       r2.Failed.Contains("vn") && !File.Exists(P("vn")), "ListStore: версия SRS новее 5 отвергается");
             }
             {
+                // через туннель - по одному (VLESS-сервер не должен получать шесть соединений сразу)
+                int cur = 0, max = 0;
+                var r = ListStore.Prepare(dir, new[] { "q1", "q2", "q3", "q4" }, id =>
+                {
+                    int n = Interlocked.Increment(ref cur);
+                    lock (dir) max = Math.Max(max, n);
+                    Thread.Sleep(30);
+                    Interlocked.Decrement(ref cur);
+                    return good;
+                }, now, parallelism: 1);
+                Check(r.Files.Count == 4 && max == 1, "ListStore: parallelism 1 - списки по одному");
+            }
+            {
                 var r = ListStore.Prepare(dir, new[] { "a", "b", "c" }, id => good, now);
                 Check(r.Files.Count == 3 && r.Failed.Count == 0 && File.Exists(P("a")) && File.Exists(P("b")) && File.Exists(P("c")), "ListStore: три списка сразу");
             }
@@ -476,7 +516,7 @@ static class Program
                 lock (changed)
                     Check(!bad && ok && api.Selected == ("proxy", "s0") && ss.CurrentServer == K0 && changed.Last() == K0, "SelectServer при подключении - Clash API, без перезапуска");
                 Check(fb.Starts == 1, "переключение не перезапускает sing-box");
-                int pc = 0; ss.PingsChanged += () => Interlocked.Increment(ref pc);
+                int pc = 0; ss.PingsChanged += _ => Interlocked.Increment(ref pc);
                 api.Delays["s0"] = 50; api.Delays["s1"] = 70;
                 Check(ss.PingConnected(CancellationToken.None) && pc == 3 && ss.Pings[K0] == 50 && ss.Pings[K1] == 70 && ss.Pings[K2] == null && api.MaxParallel == 1, "PingConnected: все по очереди, Pings по одному");
                 ss.Disconnect();
@@ -494,7 +534,7 @@ static class Program
                 ss.ConnectAsync().Wait(2000); // автовыбор: s2
                 api.Delays["s2"] = 200;       // s2 станет медленнее s0
                 api.Delays["s0"] = 77;
-                int pc = 0; ss.PingsChanged += () => Interlocked.Increment(ref pc);
+                int pc = 0; ss.PingsChanged += _ => Interlocked.Increment(ref pc);
                 lock (api.Calls) for (int i = 0; i < 3; i++) api.Proxy.Enqueue(null);
                 bool got = Until(() => { lock (sw) return sw.Count > 0; });
                 lock (sw) lock (changed)
@@ -659,6 +699,19 @@ static class Program
             bool got = Until(() => { lock (downs) return downs.Count > 0; });
             Thread.Sleep(200);
             lock (downs) Check(got && downs.Count == 1 && downs[0] == ("s1", null, null) && api.Selected == null, "с галкой никто не ответил — Down без кнопки");
+        }
+        {
+            // никто не ответил: Down один раз, но на следующей серии неудач автопереключение пробует снова
+            var api = new FakeApi { Delays = { ["s0"] = null, ["s2"] = null } };
+            var downs = new List<(string, string?, int?)>(); var sw = new List<(string, string, int)>();
+            using var w = new ServerWatch(api, tags, () => "s1", () => true, iv, 100, TimeSpan.FromSeconds(1));
+            w.Down += (c, b, m) => { lock (downs) downs.Add((c, b, m)); };
+            w.Switched += (f, t, m) => { lock (sw) sw.Add((f, t, m)); };
+            w.Start();
+            Until(() => { lock (downs) return downs.Count > 0; });
+            lock (api.Calls) api.Delays["s2"] = 40;
+            bool got = Until(() => { lock (sw) return sw.Count > 0; });
+            lock (sw) lock (downs) Check(got && sw[0] == ("s1", "s2", 40) && downs.Count == 1, "с галкой после «никто не ответил» watch пробует снова и переключает, окно не повторяется");
         }
         {
             var api = new FakeApi { Delays = { ["proxy"] = 50 } };
@@ -908,6 +961,31 @@ static class Program
         Check(SubStore.Fetch(_ => throw new HttpRequestException("нет сети"), out e) == null && e == "Подписка не скачалась: нет сети", "Fetch: сеть");
         Check(SubStore.Fetch(_ => null, out e) == null && e != null && e.StartsWith("Подписка не скачалась: "), "Fetch: get вернул null");
         Check(SubStore.Fetch(_ => (200, lichnyHtmlHeaders, lichnyHtmlBody), out e) == null && e == "Это не подписка", "Fetch: HTML и у Happ — ошибка разбора");
+        // I2: скачивание без годных серверов не затирает рабочую копию
+        {
+            var oneLink = (200, (IReadOnlyDictionary<string, string>)NoHeaders, "vless://u@h:1#a");
+            var good = new SubServer("a|h:1", "a", new Server("a", Obj(JsonNode.Parse("{\"type\":\"vless\",\"server\":\"h\",\"server_port\":1}")), []), null);
+            var inf = new SubInfo("T", 12, 5, 100, null);
+            var t0 = new DateTime(2026, 10, 24, 12, 0, 0, DateTimeKind.Utc);
+            var oldGood = new SubCache("https://s", t0.AddDays(-1), inf, [good]);
+            var oldBad = new SubCache("https://s", t0.AddDays(-1), inf, [new SubServer("b|-", "b", null, "x")]);
+            int saves = 0; SubCache? saved = null;
+            void Save(SubCache c) { saves++; saved = c; }
+            Func<string, (Server?, string?)> failAll = _ => (null, "движок не ответил");
+            Func<string, (Server?, string?)> okAll = l => (good.Server, null);
+            var r1 = SubStore.Refresh("https://s", _ => oneLink, failAll, oldGood, Save, t0);
+            Check(r1.Cache == null && r1.Error == SubStore.NoUsableServers && saves == 0, "fetch без годных серверов не затирает копию");
+            var r2 = SubStore.Refresh("https://s", _ => oneLink, failAll, oldBad, Save, t0);
+            Check(r2.Cache != null && saves == 1 && saved == r2.Cache, "нет годных и в старой копии - сохраняем новую");
+            var r3 = SubStore.Refresh("https://s", _ => oneLink, okAll, oldGood, Save, t0);
+            Check(r3.Cache != null && saves == 2 && r3.Cache.FetchedUtc == t0, "годные серверы - сохраняем");
+            var r4 = SubStore.Refresh("https://s", _ => oneLink, failAll, null, Save, t0);
+            Check(r4.Cache != null && saves == 3, "нет старой копии - сохраняем что есть");
+            var r5 = SubStore.Refresh("https://s", _ => (404, NoHeaders, ""), okAll, oldGood, Save, t0);
+            Check(r5.Cache == null && r5.Error == "Подписка не скачалась: HTTP 404" && saves == 3, "ошибка сети - ошибка Fetch, без сохранения");
+            var r6 = SubStore.Refresh("https://s", _ => oneLink, okAll, oldGood, _ => throw new IOException("диск"), t0);
+            Check(r6.Cache != null, "папка недоступна для записи - работаем без кэша на диске");
+        }
         // ключи
         var info = new SubInfo("T", 12, 5, 100, DateTimeOffset.FromUnixTimeSeconds(1793106853));
         var parse = new SubParse(info, [new("АВТО", "vless://a"), new("АВТО", "vless://b"), new("АВТО", "vless://c"), new("NL", "hysteria2://d")], [new("vm", "не поддерживается: vmess")], null);
@@ -960,6 +1038,9 @@ static class Program
         Check(Subscription.Parse(NoHeaders, Convert.ToBase64String(Encoding.UTF8.GetBytes("vless://u@h:1?a=b>c#a")).Replace('+', '-').Replace('/', '_')).Entries.Count == 1, "URL-safe base64");
         Check(Subscription.Parse(NoHeaders, "vless://u@h:1#a\r\ntrojan://p@h:2#b\r\n").Entries.Count == 2, "ссылки как есть");
         Check(Subscription.Parse(NoHeaders, "").Error == "Это не подписка", "пустой ответ");
+        var withHttp = Subscription.Parse(NoHeaders, "https://example.com/page\nvless://u@h:1#a\nhttp://x.y/z");
+        Check(withHttp.Entries.Count == 1 && withHttp.Entries[0].Link.StartsWith("vless://"), "http(s)-строки - не прокси-ссылки");
+        Check(Subscription.Parse(NoHeaders, "https://example.com/a\nhttp://example.com/b").Error == "Это не подписка", "только http(s)-строки - не подписка");
         Check(Subscription.Parse(NoHeaders, "proxies:\n  - name: a\n").Error == "Формат подписки не поддерживается", "Clash YAML");
         Check(Subscription.Parse(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["profile-title"] = "Просто имя" }, "vless://u@h:1#a").Info.Title == "Просто имя" && Subscription.Parse(NoHeaders, "vless://u@h:1#a").Info.IntervalHours == 12, "название без base64:, интервал по умолчанию 12");
 

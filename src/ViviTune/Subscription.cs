@@ -39,7 +39,7 @@ namespace ViviTune
 
             var first = text.Split('\n')[0];
             var lines = first.Contains("://") ? text : Decode(text);
-            var entries = (lines ?? "").Split('\n').Select(l => l.Trim()).Where(l => l.Contains("://")).Select(l => new SubEntry(LinkName(l), l)).ToList();
+            var entries = (lines ?? "").Split('\n').Select(l => l.Trim()).Where(l => l.Contains("://") && !l.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !l.StartsWith("https://", StringComparison.OrdinalIgnoreCase)).Select(l => new SubEntry(LinkName(l), l)).ToList();
             return entries.Count == 0 ? Fail(NotSub) : new SubParse(info, entries, none, null);
         }
 

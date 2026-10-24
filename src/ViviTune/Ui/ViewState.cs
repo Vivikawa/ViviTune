@@ -215,15 +215,17 @@ public sealed class ViewState : Observable
     public void SetSubError(string? e) => SubError = string.IsNullOrEmpty(e) ? null : e;
 
     // «StressKVN · 2,1 из 10,0 ГБ · до 27.10.2026 · обновлено 5 мин назад»
+    SubInfo? shownInfo; DateTime? shownFetched;
     public void SetSubInfo(SubInfo? info, DateTime? fetchedUtc, DateTime nowUtc)
     {
+        shownInfo = info; shownFetched = fetchedUtc;
         var parts = new List<string>();
         if (info != null)
         {
             if (!string.IsNullOrEmpty(info.Title)) parts.Add(info.Title);
             static string Gb(long b) => (b / 1073741824.0).ToString("0.0", CultureInfo.InvariantCulture).Replace('.', ',');
             parts.Add(info.Total > 0 ? $"{Gb(info.Used)} из {Gb(info.Total)} ГБ" : Gb(info.Used) + " ГБ");
-            if (info.Expire is { } e) parts.Add($"до {e.Day:00}.{e.Month:00}.{e.Year}");
+            if (info.Expire is { } e) parts.Add($"до {e.ToLocalTime():dd.MM.yyyy}");
         }
         if (fetchedUtc is { } f)
         {
@@ -235,6 +237,20 @@ public sealed class ViewState : Observable
         SubInfoText = string.Join(" · ", parts);
     }
 
+    // «обновлено …» стареет само: пересчёт по тем же данным
+    public void RefreshSubInfo(DateTime nowUtc) => SetSubInfo(shownInfo, shownFetched, nowUtc);
+    // Адрес — это подписка, которая сейчас в поле (скачанное в другой момент показываем только тогда)
+    public bool IsSubUrl(string url) => isSubscription && VlessLink.Trim() == url.Trim();
+    // Самый быстрый поддерживаемый сервер из показанных пингов, кроме current
+    public (string Key, int Ms)? FastestKnown(string current)
+    {
+        ServerRow? best = null;
+        foreach (var r in Servers)
+            if (r.Supported && r.Key != current && r.Ms is { } && r.PingClass != "…" && (best == null || r.Ms < best.Ms)) best = r;
+        return best == null ? null : (best.Key, best.Ms!.Value);
+    }
+    // Пинг через сессию кончился: у кого осталось «…» (адрес не разрешился), ответа нет
+    public void MarkUnanswered() { foreach (var r in Servers) if (r.PingClass == "…") r.SetPing(null); }
     public void RequestFetchServers() => FetchServersRequested?.Invoke();
     public void RequestPing() => PingRequested?.Invoke();
     // неподдерживаемый сервер не выбирается
@@ -461,8 +477,11 @@ public sealed class ServerRow : Observable
     public bool IsWarn => pingClass == "warn";
     public bool IsBad => pingClass == "bad";
     public bool HasReason => Reason.Length > 0;
+    // Последний ответ в мс (null — нет ответа или не мерили)
+    public int? Ms { get; private set; }
     public void SetPing(int? ms)
     {
+        Ms = ms;
         PingText = ms == null ? "нет ответа" : ms + " мс";
         PingClass = ms == null ? "bad" : ms < 100 ? "ok" : "warn";
     }

@@ -27,6 +27,7 @@ public sealed class ServerWatch : IDisposable
     int gen; // растёт в Reset: проверка, начатая до него, ничего не переключает и не сообщает
     int fails;
     bool reported;
+    bool notified; // «никто не ответил» уже показано: окно не повторяем, а автопереключение пробует на следующих сериях
     volatile bool disposed;
 
     public event Action<string, string?, int?>? Down;
@@ -46,7 +47,7 @@ public sealed class ServerWatch : IDisposable
 
     public void Reset()
     {
-        lock (sync) { gen++; fails = 0; reported = false; } // ждёт переключение, которое уже идёт (оно под sync)
+        lock (sync) { gen++; fails = 0; reported = false; notified = false; } // ждёт переключение, которое уже идёт (оно под sync)
     }
 
     public void Start() => _ = Loop(cts.Token);
@@ -75,7 +76,7 @@ public sealed class ServerWatch : IDisposable
         lock (sync)
         {
             if (g != gen) return;
-            if (d != null) { fails = 0; reported = false; return; }
+            if (d != null) { fails = 0; reported = false; notified = false; return; }
             if (++fails < Fails || reported) return;
         }
         var cur = current();
@@ -93,7 +94,7 @@ public sealed class ServerWatch : IDisposable
                 if (g != gen) return; // пока пинговали, сервер выбрали вручную
                 try { ok = best != null && select(best); }
                 catch { ok = false; }
-                if (ok) { fails = 0; reported = false; }
+                if (ok) { fails = 0; reported = false; notified = false; }
             }
             if (disposed) return;
             if (ok)
@@ -101,7 +102,15 @@ public sealed class ServerWatch : IDisposable
                 Switched?.Invoke(cur, best!, pings[best!]!.Value);
                 return;
             }
-            Report(cur, null, null, g);
+            bool first;
+            lock (sync)
+            {
+                if (g != gen) return;
+                fails = 0; // новая серия неудач - новая попытка автопереключения
+                first = !notified;
+                notified = true;
+            }
+            if (first) Down?.Invoke(cur, null, null);
         }
         else
         {
