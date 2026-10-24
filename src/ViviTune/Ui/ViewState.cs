@@ -92,7 +92,7 @@ public sealed class ViewState : Observable
                 upTotal = downTotal = 0;
                 Notify(nameof(UpTotalText), nameof(DownTotalText));
             }
-            Notify(nameof(StatusText), nameof(SettingsEditable), nameof(IsBusy), nameof(IsConnected), nameof(CanFetch), nameof(CanFetchNow));
+            Notify(nameof(StatusText), nameof(SettingsEditable), nameof(IsBusy), nameof(IsConnected), nameof(CanFetch), nameof(CanFetchNow), nameof(CanPing));
         }
     }
 
@@ -185,10 +185,10 @@ public sealed class ViewState : Observable
     public bool IsSubscription => isSubscription;
     public bool CanFetch => isSubscription && SettingsEditable;
     public bool Fetching { get => fetching; set { if (Set(ref fetching, value)) Notify(nameof(CanPing), nameof(CanFetchNow)); } }
-    public bool CanFetchNow => CanFetch && !fetching;
+    public bool CanFetchNow => CanFetch && !fetching && !pinging;
     // идёт пинг: «↻» недоступна (два пинга не накладываются)
-    public bool Pinging { get => pinging; set { if (Set(ref pinging, value)) Notify(nameof(CanPing)); } }
-    public bool CanPing => !pinging && !fetching && Servers.Any(r => r.Supported);
+    public bool Pinging { get => pinging; set { if (Set(ref pinging, value)) Notify(nameof(CanPing), nameof(CanFetchNow)); } }
+    public bool CanPing => !pinging && !fetching && (SettingsEditable || IsConnected) && Servers.Any(r => r.Supported);
     public string SubInfoText { get => subInfoText; private set => Set(ref subInfoText, value); }
     public string? SubError { get => subError; private set => Set(ref subError, value); }
     public ObservableCollection<ServerRow> Servers { get; } = new();
@@ -210,6 +210,8 @@ public sealed class ViewState : Observable
     }
     public void SetPing(string key, int? ms) => Servers.FirstOrDefault(r => r.Key == key)?.SetPing(ms);
     public void SetPinging(string key) => Servers.FirstOrDefault(r => r.Key == key)?.SetPinging();
+    // Пинг кончился (в том числе прерван): строки, оставшиеся на «…», возвращаются к прежнему значению
+    public void ResetPinging() { foreach (var r in Servers) r.ResetPinging(); }
     public void SetSubError(string? e) => SubError = string.IsNullOrEmpty(e) ? null : e;
 
     // «StressKVN · 2,1 из 10,0 ГБ · до 27.10.2026 · обновлено 5 мин назад»
@@ -464,7 +466,17 @@ public sealed class ServerRow : Observable
         PingText = ms == null ? "нет ответа" : ms + " мс";
         PingClass = ms == null ? "bad" : ms < 100 ? "ok" : "warn";
     }
-    public void SetPinging() { PingText = "…"; PingClass = "…"; }
+    string prevText = "", prevClass = "";
+    public void SetPinging()
+    {
+        if (pingClass != "…") { prevText = pingText; prevClass = pingClass; }
+        PingText = "…"; PingClass = "…";
+    }
+    public void ResetPinging()
+    {
+        if (pingClass != "…") return;
+        PingText = prevText; PingClass = prevClass;
+    }
 }
 
 public sealed class AppRow : Observable

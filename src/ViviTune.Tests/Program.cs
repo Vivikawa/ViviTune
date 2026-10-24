@@ -91,7 +91,15 @@ static class Program
         v.AutoServer = true; v.AutoServer = true;
         v.RequestSetAutoServer(true); v.RequestSetAutoServer(false);
         Check(notes == 2 && ev == 1, "AutoServer: уведомление без изменения, событие только по изменению");
-        v.Pinging = true; Check(!v.CanPing, "пока пинг идёт, ↻ недоступна");
+        v.Pinging = true; Check(!v.CanPing && !v.CanFetchNow, "пока пинг идёт, ↻ и «Получить серверы» недоступны");
+        v.Pinging = false;
+        v.State = ConnState.Checking; Check(!v.CanPing, "↻ недоступна при проверке");
+        v.State = ConnState.Restarting; Check(!v.CanPing, "↻ недоступна при перезапуске");
+        v.State = ConnState.Connected; Check(v.CanPing, "↻ доступна при подключении");
+        v.State = ConnState.Disconnected;
+        v.SetPing("A|h:443", 48); v.SetPinging("A|h:443"); v.SetPinging("B|h:443");
+        v.ResetPinging();
+        Check(v.Servers[0].PingText == "48 мс" && v.Servers[0].PingClass == "ok" && v.Servers[1].PingClass == "warn" && v.Servers[1].PingText == "142 мс", "ResetPinging: «…» возвращается к прежнему значению");
     }
 
     static void DevLogTests()

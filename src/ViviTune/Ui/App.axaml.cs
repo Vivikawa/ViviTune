@@ -285,7 +285,8 @@ namespace ViviTune.Ui
             session.Speed += s => Dispatcher.UIThread.Post(() => state.PushSpeed(s));
 
             // ---- подписка: получить серверы, пинг, выбор, галка ----
-            CancellationTokenSource? pingCts = null; // пинг временным sing-box: подключение его отменяет
+            CancellationTokenSource? pingCts = null;
+            Task pingTask = Task.CompletedTask; // идущий пинг: подключение ждёт его остановки // пинг временным sing-box: подключение его отменяет
             // Пинг без подключения: один временный sing-box с outbound'ами всех поддерживаемых серверов; не в UI-потоке
             void PingOffline(IReadOnlyList<SubServer> servers, CancellationToken ct)
             {
@@ -310,8 +311,11 @@ namespace ViviTune.Ui
                     File.WriteAllText(cfg, ConfigBuilder.BuildProbe(outs, apiPort, secret));
                     sb.Start(cfg);
                     for (var end = DateTime.UtcNow.AddSeconds(3); ; Thread.Sleep(50))
+                    {
+                        if (ct.IsCancellationRequested) return; // finally остановит sing-box
                         try { using var c = new System.Net.Sockets.TcpClient(); c.Connect(System.Net.IPAddress.Loopback, apiPort); break; }
                         catch (System.Net.Sockets.SocketException) when (DateTime.UtcNow < end) { }
+                    }
                     using var api = new ClashApi(apiPort, secret);
                     Pinger.Ping(api, tags, 3000, null, (t, ms) => { if (!ct.IsCancellationRequested) Dispatcher.UIThread.Post(() => state.SetPing(keys[t], ms)); }, ct);
                 }
@@ -330,14 +334,14 @@ namespace ViviTune.Ui
                 foreach (var r in state.Servers.Where(r => r.Supported)) state.SetPinging(r.Key);
                 pingCts?.Cancel();
                 var cts = pingCts = new CancellationTokenSource();
-                Task.Run(() =>
+                pingTask = Task.Run(() =>
                 {
                     try
                     {
                         if (!session.PingConnected(cts.Token) && session.State == ConnState.Disconnected) PingOffline(servers, cts.Token);
                     }
                     catch (Exception e) { Dispatcher.UIThread.Post(() => state.AddLog("Пинг серверов: " + e.Message)); }
-                    Dispatcher.UIThread.Post(() => state.Pinging = false);
+                    Dispatcher.UIThread.Post(() => { state.Pinging = false; state.ResetPinging(); });
                 });
             }
             state.PingRequested += StartPing;
@@ -393,10 +397,15 @@ namespace ViviTune.Ui
             state.ToggleRequested += async () =>
             {
                 auto?.Cancel(); // пользователь решил сам: попытки автозапуска больше не нужны
-                if (session.State == ConnState.Disconnected) pingCts?.Cancel(); // пинг временным sing-box не мешает подключению
                 try
                 {
-                    if (session.State == ConnState.Disconnected) await session.ConnectAsync();
+                    if (session.State == ConnState.Disconnected)
+                    {
+                        // пробный sing-box должен остановиться до подключения: два процесса и пинги рядом не нужны
+                        pingCts?.Cancel();
+                        await Task.WhenAny(pingTask, Task.Delay(5000));
+                        await session.ConnectAsync();
+                    }
                     else await Task.Run(session.Disconnect); // может ждать перезапуска до ~3 с: не в UI-потоке
                 }
                 catch (Exception e) { state.AddLog("Ошибка: " + e.Message); }
