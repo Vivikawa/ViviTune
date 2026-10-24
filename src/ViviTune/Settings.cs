@@ -37,6 +37,27 @@ namespace ViviTune
 
         public List<string> Sites { get; set; } = new List<string>(); // свои сайты: нормализованные домены/IP/подсети
 
+        // Подписка: ключ выбранного сервера (null — не выбран, не пишется) и автовыбор самого быстрого при подключении
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Server { get; set; }
+        public bool AutoServer { get; set; }
+
+        // Подписка — ссылка http:// или https://
+        public static bool IsSubscription(string? link)
+        {
+            var l = link?.Trim() ?? "";
+            return l.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || l.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Другое поле — другой набор серверов: выбор сбрасывается (true — App удаляет subscription.json)
+        public bool SetVlessLink(string link)
+        {
+            if (link == VlessLink) return false;
+            VlessLink = link;
+            Server = null;
+            return true;
+        }
+
         // Только для разработчика: уровень лога sing-box и запись в sing-box.log; null — выключено
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? SingBoxLog { get; set; }
@@ -59,6 +80,8 @@ namespace ViviTune
                     else if (kv.Key.Equals("Mode", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue mv && mv.TryGetValue<string>(out var mode))
                         s.Mode = mode.Equals("vless", StringComparison.OrdinalIgnoreCase) ? ProxyMode.Vless : ProxyMode.Socks5;
                     else if (kv.Key.Equals("VlessLink", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue lv && lv.TryGetValue<string>(out var link)) s.VlessLink = link;
+                    else if (kv.Key.Equals("Server", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue sv0 && sv0.TryGetValue<string>(out var srvKey) && srvKey != "") s.Server = srvKey;
+                    else if (kv.Key.Equals("AutoServer", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue av && av.TryGetValue<bool>(out var auto)) s.AutoServer = auto;
                     else if (kv.Key.Equals("SingBoxLog", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue bv && bv.TryGetValue<string>(out var lvl) && lvl.ToLowerInvariant() is "trace" or "debug" or "info" or "warn" or "error") s.SingBoxLog = lvl.ToLowerInvariant();
                     else if (kv.Key.Equals("Lists", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonArray larr)
                     {
@@ -134,7 +157,7 @@ namespace ViviTune
         public Settings Clone() => new Settings
         {
             Ip = Ip, Port = Port, DirectPort = DirectPort, SingBoxLog = SingBoxLog,
-            Mode = Mode, VlessLink = VlessLink, Lists = Lists.ToList(), Sites = Sites.ToList(),
+            Mode = Mode, VlessLink = VlessLink, Server = Server, AutoServer = AutoServer, Lists = Lists.ToList(), Sites = Sites.ToList(),
             Apps = Apps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList(),
             DirectApps = DirectApps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList()
         };

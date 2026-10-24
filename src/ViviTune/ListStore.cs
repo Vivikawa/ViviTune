@@ -62,15 +62,7 @@ namespace ViviTune
             Directory.CreateDirectory(dir);
             int port = Session.FreePort();
             var cfg = Path.Combine(dir, $"fetch-{port}.json"); // со своим портом: два вызова подряд не делят файл
-            var tunnel = new Lazy<IWebProxy>(() => // исключение кэшируется: не поднялся — все списки сразу напрямую
-            {
-                File.WriteAllText(cfg, ConfigBuilder.BuildFetch(proxy, port));
-                sb.Start(cfg);
-                for (var end = DateTime.UtcNow.AddSeconds(3); ; Thread.Sleep(50))
-                    try { using var c = new TcpClient(); c.Connect(IPAddress.Loopback, port); break; }
-                    catch (SocketException) when (DateTime.UtcNow < end) { }
-                return new WebProxy("http://127.0.0.1:" + port);
-            });
+            var tunnel = new Lazy<IWebProxy>(() => StartTunnel(cfg, sb, proxy, port)); // исключение кэшируется: не поднялся — все списки сразу напрямую
             try
             {
                 return Prepare(dir, ids, id =>
@@ -84,6 +76,18 @@ namespace ViviTune
                 sb.Stop();
                 try { File.Delete(cfg); } catch { } // в нём ключ VLESS
             }
+        }
+
+        // Запускает временный sing-box (без TUN) с локальным прокси на порту и ждёт, пока порт откроется (до 3 с).
+        // Останавливать sb и удалять cfg (в нём ключ VLESS) должен вызывающий.
+        public static IWebProxy StartTunnel(string cfg, ISingBox sb, JsonObject proxy, int port)
+        {
+            File.WriteAllText(cfg, ConfigBuilder.BuildFetch(proxy, port));
+            sb.Start(cfg);
+            for (var end = DateTime.UtcNow.AddSeconds(3); ; Thread.Sleep(50))
+                try { using var c = new TcpClient(); c.Connect(IPAddress.Loopback, port); break; }
+                catch (SocketException) when (DateTime.UtcNow < end) { }
+            return new WebProxy("http://127.0.0.1:" + port);
         }
 
         // proxy null — системный, как у браузера.

@@ -36,6 +36,8 @@ static class Program
         VlessConfigTests();
         SubscriptionConfigTests();
         PingerTests();
+        SettingsV6Tests();
+        SubSessionTests();
         RuleFilesTests();
         ListStoreTests();
         VlessProbeTests();
@@ -269,24 +271,6 @@ static class Program
     // одиночная ссылка, как её строит Session
     static VlessPrep Single(JsonObject proxy, IPAddress ip) => new([ip], [proxy], null, new Dictionary<string, string>(), new Dictionary<string, string>());
 
-    sealed class FakeApi : IClashApi
-    {
-        public Dictionary<string, int?> Delays = new();
-        public List<string> Calls = new();
-        public int MaxParallel;
-        public TimeSpan Wait;
-        public (string Group, string Tag)? Selected;
-        int cur;
-        public int? Delay(string tag, int timeoutMs, CancellationToken ct)
-        {
-            var n = Interlocked.Increment(ref cur);
-            lock (Calls) { Calls.Add(tag); MaxParallel = Math.Max(MaxParallel, n); }
-            try { if (Wait > TimeSpan.Zero) Thread.Sleep(Wait); return Delays.TryGetValue(tag, out var d) ? d : null; }
-            finally { Interlocked.Decrement(ref cur); }
-        }
-        public bool Select(string group, string tag) { Selected = (group, tag); return true; }
-    }
-
     static void PingerTests()
     {
         var api = new FakeApi { Delays = { ["s0"] = 120, ["s1"] = null, ["s2"] = 40 } };
@@ -300,6 +284,160 @@ static class Program
         Check(Pinger.Ping(slow, ["a", "b", "c", "d", "e"], 3000, TimeSpan.FromMilliseconds(150), null, CancellationToken.None).Count < 5, "Pinger: cap обрывает очередь");
         using var cts = new CancellationTokenSource(); cts.Cancel();
         Check(Pinger.Ping(new FakeApi(), ["a", "b"], 3000, null, null, cts.Token).Count == 0, "Pinger: отмена -> ничего не проверяет");
+    }
+
+    static void SettingsV6Tests()
+    {
+        var p = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(p, "{\"VlessLink\":\"https://sub\",\"Server\":\"NL|h:443\",\"AutoServer\":true}");
+            var s = Settings.Load(p);
+            Check(s.Server == "NL|h:443" && s.AutoServer && s.Clone().Server == "NL|h:443" && s.Clone().AutoServer, "Settings v6: Server, AutoServer");
+            Check(!s.SetVlessLink("https://sub") && s.Server == "NL|h:443", "та же ссылка - выбор сохраняется");
+            Check(s.SetVlessLink("vless://u@h:1") && s.Server == null && s.VlessLink == "vless://u@h:1", "смена поля сбрасывает Server");
+            new Settings().Save(p);
+            Check(!File.ReadAllText(p).Contains("\"Server\""), "Server не пишется, пока не выбран");
+            Check(Settings.IsSubscription(" HTTPS://x/y ") && Settings.IsSubscription("http://x") && !Settings.IsSubscription("vless://x") && !Settings.IsSubscription(""), "IsSubscription");
+        }
+        finally { File.Delete(p); }
+    }
+
+    static void SubSessionTests()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "vivitune-subtests-" + Guid.NewGuid().ToString("N"));
+        int n = 0;
+        string NewCfg() { var d = Path.Combine(root, (++n).ToString()); Directory.CreateDirectory(d); return Path.Combine(d, "config.json"); }
+        const string Url = "https://sub.example.com/t0ken";
+        const string K0 = "A|203.0.113.1:443", K1 = "B|203.0.113.2:443", K2 = "C|203.0.113.3:443";
+        SubServer Sv(string name, string host) => new(name + "|" + host + ":443", name, FakeVless.FakeServer("vless://u@" + host + ":443"), null);
+        SubCache Cache(DateTime? fetched = null) => new(Url, fetched ?? DateTime.UtcNow,
+            new SubInfo(null, 24, 0, 0, null), [Sv("A", "203.0.113.1"), Sv("B", "203.0.113.2"), Sv("C", "203.0.113.3")]);
+        Settings Sub(string? server = null, bool auto = false) => new Settings { Mode = ProxyMode.Vless, VlessLink = Url, Server = server, AutoServer = auto, Apps = A(@"C:\a\chrome.exe") };
+        JsonObject Selector(string cfg) => Obj(Arr(JsonNode.Parse(File.ReadAllText(cfg))!["outbounds"])[0]);
+        string? Default(string cfg) => Str(Selector(cfg)["default"]);
+        try
+        {
+            {
+                var fb = new FakeSingBox(); var fv = new FakeVless(root, cache: Cache()); var cfg = NewCfg();
+                using var ss = new Session(Sub(K1), fb, cfg, Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Connected && fv.Fetches == 0 && Default(cfg) == "s1" && ss.CurrentServer == K1 && fv.Reaches == 1,
+                    "подписка: свежий кэш - без скачивания, выбранный из Settings.Server, TCP-проверка выбранного");
+                Check(Arr(Selector(cfg)["outbounds"]).Count == 3, "подписка: все серверы в selector");
+            }
+            {
+                var fb = new FakeSingBox(); var fv = new FakeVless(root, cache: Cache(DateTime.UtcNow.AddDays(-3)), fetch: _ => (null, "Подписка не скачалась: нет сети"));
+                var logs = new List<string>();
+                using var ss = new Session(Sub(), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.Log += l => { lock (logs) logs.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                lock (logs)
+                    Check(logs.Contains("Подписка не обновилась, работаю по копии: Подписка не скачалась: нет сети") && ss.State == ConnState.Connected && fv.Fetches == 1 && fv.Saves == 0,
+                        "подписка не скачалась - работаем по копии");
+            }
+            {
+                var fb = new FakeSingBox(); var fv = new FakeVless(root, fetch: _ => (null, "Подписка не скачалась: нет сети"));
+                using var ss = new Session(Sub(), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.Error == "Подписка не скачалась: нет сети" && fb.Starts == 0 && ss.State == ConnState.Disconnected, "нет копии и не скачалась - ошибка");
+            }
+            {
+                var fb = new FakeSingBox();
+                var c = Cache() with { Servers = [new SubServer("X|-", "X", null, "не поддерживается")] };
+                var fv = new FakeVless(root, cache: c);
+                using var ss = new Session(Sub(), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.Error == "В подписке нет серверов, которые ViviTune умеет" && fb.Starts == 0, "одни неподдерживаемые");
+            }
+            {
+                var fb = new FakeSingBox(); var fv = new FakeVless(root, fetch: _ => (Cache(), null));
+                using var ss = new Session(Sub(), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Connected && fv.Fetches == 1 && fv.Saves == 1, "подписка: нет копии - скачали и подключились");
+            }
+            {
+                // сервер не разрешился: не в конфиге, выбранным становится первый из оставшихся
+                var fb = new FakeSingBox();
+                var c = Cache() with { Servers = [Sv("H", "host.example.com"), Sv("A", "203.0.113.1")] };
+                var fv = new FakeVless(root, cache: c, resolve: _ => null); var cfg = NewCfg();
+                using var ss = new Session(Sub("H|host.example.com:443"), fb, cfg, Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Connected && ss.CurrentServer == K0 && Arr(Selector(cfg)["outbounds"]).Count == 1, "подписка: не разрешившийся сервер не входит в конфиг");
+            }
+            // автовыбор
+            {
+                var fb = new FakeSingBox(); var api = new FakeApi { Delays = { ["s0"] = 120, ["s1"] = null, ["s2"] = 40 } };
+                var fv = new FakeVless(root, cache: Cache(), api: api); var cfg = NewCfg();
+                var changed = new List<string>();
+                using var ss = new Session(Sub(K1, true), fb, cfg, Up, Delay, fv.Deps);
+                ss.ServerChanged += k => { lock (changed) changed.Add(k); };
+                ss.ConnectAsync().Wait(2000);
+                lock (changed)
+                    Check(api.Selected == ("proxy", "s2") && ss.CurrentServer == K2 && changed.Count == 1 && changed.Last() == K2 && fv.Reaches == 0 && ss.State == ConnState.Connected,
+                        "автовыбор: самый быстрый, без TCP-проверки");
+                Check(api.MaxParallel == 1 && ss.Pings[K0] == 120 && ss.Pings[K1] == null && ss.Pings[K2] == 40 && fv.AfterStarts == 1, "автовыбор: пинги по очереди, Pings заполнены");
+            }
+            {
+                var fb = new FakeSingBox(); var api = new FakeApi();
+                var fv = new FakeVless(root, cache: Cache(), api: api); var cfg = NewCfg();
+                using var ss = new Session(Sub(K1, true), fb, cfg, Up, Delay, fv.Deps);
+                ss.ConnectAsync().Wait(2000);
+                Check(api.Selected == null && ss.CurrentServer == K1 && ss.State == ConnState.Connected && Default(cfg) == "s1", "автовыбор: никто не ответил - прежний");
+            }
+            {
+                var fb = new FakeSingBox(); var api = new FakeApi { Wait = TimeSpan.FromMilliseconds(200) };
+                var fv = new FakeVless(root, cache: Cache(), api: api, pingCap: TimeSpan.FromMilliseconds(250));
+                using var ss = new Session(Sub(K1, true), fb, NewCfg(), Up, Delay, fv.Deps);
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                ss.ConnectAsync().Wait(5000);
+                lock (api.Calls)
+                    Check(api.Calls.Count == 2 && ss.State == ConnState.Connected && sw.Elapsed < TimeSpan.FromSeconds(3), "автовыбор: cap обрывает очередь");
+            }
+            {
+                // Disconnect во время автовыбора
+                var fb = new FakeSingBox(); var api = new FakeApi { Wait = TimeSpan.FromMilliseconds(300), Delays = { ["s0"] = 10, ["s1"] = 5, ["s2"] = 1 } };
+                var fv = new FakeVless(root, cache: Cache(), api: api);
+                var changed = new List<string>();
+                using var ss = new Session(Sub(K1, true), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ServerChanged += k => { lock (changed) changed.Add(k); };
+                var t = ss.ConnectAsync();
+                Thread.Sleep(150);
+                ss.Disconnect();
+                Thread.Sleep(1200);
+                lock (changed)
+                    Check(ss.State == ConnState.Disconnected && ss.CurrentServer == null && changed.Count == 0 && ss.Pings.Count == 0 && !fb.Running && api.Selected == null,
+                        "автовыбор: Disconnect посреди - отключено, ничего не выбрано и не сохранено");
+            }
+            // ручной выбор
+            {
+                var fb = new FakeSingBox(); var api = new FakeApi(); var fv = new FakeVless(root, cache: Cache(), api: api);
+                var changed = new List<string>();
+                using var ss = new Session(Sub(K1), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ServerChanged += k => { lock (changed) changed.Add(k); };
+                Check(!ss.SelectServer(K0), "SelectServer: не подключено - false");
+                ss.ConnectAsync().Wait(2000);
+                bool bad = ss.SelectServer("нет|-");
+                bool ok = ss.SelectServer(K0);
+                lock (changed)
+                    Check(!bad && ok && api.Selected == ("proxy", "s0") && ss.CurrentServer == K0 && changed.Last() == K0, "SelectServer при подключении - Clash API, без перезапуска");
+                Check(fb.Starts == 1, "переключение не перезапускает sing-box");
+                int pc = 0; ss.PingsChanged += () => Interlocked.Increment(ref pc);
+                api.Delays["s0"] = 50; api.Delays["s1"] = 70;
+                Check(ss.PingConnected(CancellationToken.None) && pc == 3 && ss.Pings[K0] == 50 && ss.Pings[K1] == 70 && ss.Pings[K2] == null && api.MaxParallel == 1, "PingConnected: все по очереди, Pings по одному");
+                ss.Disconnect();
+                Check(!ss.SelectServer(K1) && !ss.PingConnected(CancellationToken.None) && ss.Pings.Count == 0, "после отключения SelectServer и PingConnected - false, Pings пусты");
+            }
+            {
+                // одиночная ссылка: SelectServer/PingConnected не работают, ServerChanged нет
+                var fb = new FakeSingBox(); var fv = new FakeVless(root); int ev = 0;
+                using var ss = new Session(Vless1(), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ServerChanged += _ => Interlocked.Increment(ref ev);
+                ss.ConnectAsync().Wait(2000);
+                Check(ss.State == ConnState.Connected && !ss.SelectServer(K0) && !ss.PingConnected(CancellationToken.None) && ss.CurrentServer == null && ev == 0, "одиночная ссылка: без выбора сервера");
+            }
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
     }
 
     static void SubscriptionConfigTests()
@@ -2604,6 +2742,24 @@ sealed class FakeSingBox : ISingBox
     public void LateExited() => Exited?.Invoke(); // Exited прежнего процесса пришёл, когда новый уже работает
 }
 
+sealed class FakeApi : IClashApi
+{
+    public Dictionary<string, int?> Delays = new();
+    public List<string> Calls = new();
+    public int MaxParallel;
+    public TimeSpan Wait;
+    public (string Group, string Tag)? Selected;
+    int cur;
+    public int? Delay(string tag, int timeoutMs, CancellationToken ct)
+    {
+        var n = Interlocked.Increment(ref cur);
+        lock (Calls) { Calls.Add(tag); MaxParallel = Math.Max(MaxParallel, n); }
+        try { if (Wait > TimeSpan.Zero) Thread.Sleep(Wait); return Delays.TryGetValue(tag, out var d) ? d : null; }
+        finally { Interlocked.Decrement(ref cur); }
+    }
+    public bool Select(string group, string tag) { Selected = (group, tag); return true; }
+}
+
 // Подмена VlessDeps: считает вызовы, запоминает id списков и адрес Clash API. По умолчанию имя не разрешается,
 // сервер отвечает, каждый список — существующий файл в dir, проверка после запуска проходит.
 sealed class FakeVless
@@ -2614,6 +2770,8 @@ sealed class FakeVless
     public int ApiPort;
     public string? ApiSecret;
     public JsonObject? LastProxy;
+    public int Fetches, Saves;
+    public SubCache? Cache;
     public readonly VlessDeps Deps;
 
     // «Разбор» ссылки без движка: адрес и порт из Uri, тип по схеме
@@ -2626,10 +2784,23 @@ sealed class FakeVless
 
     public FakeVless(string dir, Func<string, IPAddress?>? resolve = null, Func<IPAddress, int, string?>? reach = null,
         Func<IReadOnlyList<string>, ListsResult>? lists = null, Func<int, string, CancellationToken, string?>? afterStart = null,
-        Func<string, (Server?, string?)>? decode = null)
+        Func<string, (Server?, string?)>? decode = null, SubCache? cache = null, Func<SubCache?, (SubCache?, string?)>? fetch = null,
+        FakeApi? api = null, TimeSpan? pingCap = null)
     {
+        Cache = cache;
         Deps = new VlessDeps
         {
+            LoadSub = url => Cache != null && Cache.Url == url ? Cache : null,
+            FetchSub = (url, old) =>
+            {
+                Interlocked.Increment(ref Fetches);
+                var r = fetch != null ? fetch(old) : (old, null);
+                if (r.Item1 != null) { Interlocked.Increment(ref Saves); Cache = r.Item1; }
+                return r;
+            },
+            Api = (port, secret) => { lock (Api) { ApiPort = port; ApiSecret = secret; } return api ?? new FakeApi(); },
+            PingMs = 100,
+            PingCap = pingCap ?? TimeSpan.FromSeconds(5),
             Decode = decode ?? (l => (FakeServer(l), null)),
             Resolve = host => { Interlocked.Increment(ref Resolves); return resolve?.Invoke(host); },
             Reach = (ip, port) => { Interlocked.Increment(ref Reaches); return reach?.Invoke(ip, port); },

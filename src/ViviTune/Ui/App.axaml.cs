@@ -34,6 +34,51 @@ namespace ViviTune.Ui
             devLog?.Write($"=== ViviTune {typeof(App).Assembly.GetName().Version?.ToString(3)} ===");
             var engine = Links.Engine(Path.Combine(dir, "sing-box.exe")); // decode-link: для Session и сводки в UI
             var runner = new Runner(Path.Combine(dir, "sing-box.exe"));
+            var subPath = Path.Combine(dir, "subscription.json");
+            // GET с заданным User-Agent; proxy null — системный. Текст исключения не содержит адрес: токен секретен
+            static (int, IReadOnlyDictionary<string, string>, string)? HttpGet(string url, string ua, System.Net.IWebProxy? proxy)
+            {
+                try
+                {
+                    using var http = new HttpClient(new HttpClientHandler { Proxy = proxy, AllowAutoRedirect = true }) { Timeout = TimeSpan.FromSeconds(15) };
+                    using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                    req.Headers.UserAgent.ParseAdd(ua);
+                    using var resp = http.SendAsync(req).GetAwaiter().GetResult();
+                    var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var h in resp.Headers.Concat(resp.Content.Headers)) headers[h.Key] = string.Join(",", h.Value);
+                    return ((int)resp.StatusCode, headers, resp.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+                }
+                catch (Exception e) when (e is not HttpRequestException and not TaskCanceledException) { throw new InvalidOperationException("ошибка запроса"); }
+            }
+            // Скачать подписку одним способом (прокси null — системный): кэш уже сохранён или текст ошибки
+            (SubCache? Cache, string? Error) FetchVia(string url, System.Net.IWebProxy? proxy)
+            {
+                var p = SubStore.Fetch(ua => HttpGet(url, ua, proxy), out var error);
+                if (p == null) return (null, error);
+                var cache = new SubCache(url, DateTime.UtcNow, p.Info, SubStore.Decode(p, l => (Links.Decode(l, engine, out var e), e)));
+                try { SubStore.Save(subPath, cache); } catch (Exception) { } // папка недоступна для записи: работаем без кэша на диске
+                return (cache, null);
+            }
+            // Напрямую; не вышло и есть копия — через выбранный сервер из неё временным sing-box (как списки)
+            (SubCache? Cache, string? Error) FetchSub(string url, SubCache? old)
+            {
+                var r = FetchVia(url, null);
+                if (r.Cache != null || old == null) return r;
+                var srv = (old.Servers.FirstOrDefault(s => s.Server != null && s.Key == settings.Server) ?? old.Servers.FirstOrDefault(s => s.Server != null))?.Server;
+                if (srv == null) return r;
+                int port = Session.FreePort();
+                var cfg = Path.Combine(dir, $"fetch-{port}.json");
+                try
+                {
+                    var ip = System.Net.IPAddress.TryParse(srv.Host, out var lit) ? lit : System.Net.Dns.GetHostAddresses(srv.Host).First();
+                    var proxy = ConfigBuilder.ProxyOutbound(srv, ip);
+                    using var fetch = new Runner(Path.Combine(dir, "sing-box.exe"));
+                    try { return FetchVia(url, ListStore.StartTunnel(cfg, fetch, proxy, port)); }
+                    finally { fetch.Stop(); }
+                }
+                catch (Exception) { return r; } // не вышло и так: ошибка прямой попытки
+                finally { try { File.Delete(cfg); } catch { } } // в нём ключ VLESS
+            }
             var session = new Session(settings, runner, Path.Combine(dir, "config.json"), ProxyProbe.Probe, TimeSpan.FromSeconds(1), new VlessDeps
             {
                 // сначала IPv4; исключения ловит Session
@@ -45,6 +90,9 @@ namespace ViviTune.Ui
                     using var fetch = new Runner(Path.Combine(dir, "sing-box.exe")); // Job Object: умрёт вместе с нами
                     return ListStore.PrepareVia(Path.Combine(dir, "lists"), ids, fetch, proxy, DateTime.UtcNow);
                 },
+                LoadSub = url => SubStore.Load(subPath, url),
+                FetchSub = FetchSub,
+                Api = (p, s) => new ClashApi(p, s),
                 AfterStart = (p, s, ct) => VlessProbe.AfterStart(p, s, ct, devLog == null ? null : devLog.Write) ?? Flush()
             });
             // Очистка кэша DNS — по возможности: экспорт недокументирован, его сбой не должен ронять запуск.
@@ -195,6 +243,8 @@ namespace ViviTune.Ui
                 devLog?.Write(line);
                 if (devLog == null || !LogFile.IsVerbose(line)) Dispatcher.UIThread.Post(() => state.AddLog(line));
             };
+            // выбранный сервер подписки запоминаем (при автовыборе и ручном переключении); AppsChanged не нужен
+            session.ServerChanged += key => Dispatcher.UIThread.Post(() => { settings.Server = key; Save(); });
             session.Speed += s => Dispatcher.UIThread.Post(() => state.PushSpeed(s));
 
             CancellationTokenSource? auto = null; // попытки подключения при автозапуске
@@ -218,7 +268,7 @@ namespace ViviTune.Ui
             state.SetVlessRequested += link =>
             {
                 if (session.State != ConnState.Disconnected) return;
-                settings.VlessLink = link;
+                if (settings.SetVlessLink(link)) try { File.Delete(subPath); } catch (Exception) { } // другое поле — чужой кэш и выбор
                 SetVless(link);
                 Save();
             };

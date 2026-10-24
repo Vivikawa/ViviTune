@@ -25,6 +25,12 @@ public sealed class VlessDeps
     public required Func<IReadOnlyList<string>, JsonObject, ListsResult> PrepareLists { get; init; } // (id списков, готовый outbound proxy)
     // после запуска sing-box: (порт Clash API, секрет, отмена) -> null или текст ошибки для пользователя
     public required Func<int, string, CancellationToken, string?> AfterStart { get; init; }
+    // подписка: url -> кэш с диска; (url, прежний кэш) -> новый кэш (уже сохранённый) или текст ошибки
+    public required Func<string, SubCache?> LoadSub { get; init; }
+    public required Func<string, SubCache?, (SubCache? Cache, string? Error)> FetchSub { get; init; }
+    public required Func<int, string, IClashApi> Api { get; init; }       // (порт, секрет) -> клиент Clash API
+    public int PingMs { get; init; } = 3000;                              // таймаут одного пинга
+    public TimeSpan PingCap { get; init; } = TimeSpan.FromSeconds(20);    // сколько всего пинговать при автовыборе
 }
 
 // Проверка после запуска sing-box не прошла: текст для пользователя как есть, без «Не удалось запустить: ».
@@ -61,6 +67,8 @@ public sealed record Verdict(Exits Live, IReadOnlyList<string> Warnings, string?
 // attempt/ticket и состояние: за это время могли отключить или изменить список.
 // В VLESS проверка после запуска (сервер и DNS через Clash API) идёт под ops, между Start и счётчиком скорости;
 // её отмену (cts) берём под gate вместе с attempt/ticket, Disconnect отменяет её до того, как ждать ops.
+// Подписка: сервер, Clash API и пинги (currentServer, api, pings) тоже под gate; автовыбор идёт в StartSingBox под ops
+// (отмена — cts, как у AfterStart), SelectServer и PingConnected ходят в Clash API вне блокировок и сверяют epoch.
 // Настройки копируются в потоке вызывающего (ConnectAsync/AppsChanged): живой Settings из фона не читается.
 // Обработчики событий не должны блокироваться на UI-потоке (Post, а не Invoke).
 public sealed class Session : IDisposable
@@ -105,10 +113,17 @@ public sealed class Session : IDisposable
     int epoch;          // меняется при каждом входе в Connected
     CancellationTokenSource cts = new(); // отмена проверки после запуска; Disconnect отменяет и заменяет новым
     bool disposed;
+    string? currentServer;                    // подписка: ключ сервера, на котором работает sing-box
+    IClashApi? api;                           // подписка: клиент Clash API запущенного sing-box
+    IReadOnlyDictionary<string, int?> pings = new Dictionary<string, int?>(); // ключ -> последний пинг; заменяется целиком
 
     public event Action? Changed;
     public event Action<string>? Log;
     public event Action<Speed>? Speed;
+    public event Action<string>? ServerChanged; // ключ текущего сервера подписки (вне gate)
+    public event Action? PingsChanged;          // вне gate
+    public string? CurrentServer { get { lock (gate) return currentServer; } }
+    public IReadOnlyDictionary<string, int?> Pings { get { lock (gate) return pings; } }
 
     public ConnState State { get { lock (gate) return state; } }
     public string? Error { get { lock (gate) return error; } }
@@ -220,9 +235,9 @@ public sealed class Session : IDisposable
         lock (gate) snap = latest!;
         while (true)
         {
-            var v = CheckExits(snap); // вне блокировок: Disconnect и AppsChanged в это время не ждут
+            var v = CheckExits(snap, null, true); // вне блокировок: Disconnect и AppsChanged в это время не ждут
 
-            string? fail = null;
+            string? fail = null, srvKey = null;
             bool restart = false, hot = false;
             int t = 0;
             lock (ops)
@@ -242,8 +257,9 @@ public sealed class Session : IDisposable
                 }
                 if (fail == null)
                 {
+                    Started? st = null;
                     TrafficMeter? m = null;
-                    try { m = StartSingBox(used, v, ct); }
+                    try { st = StartSingBox(used, v, ct, true); m = st.Meter; }
                     catch (CheckFailedException e) { fail = e.Message; }
                     catch (Exception e) { fail = "Не удалось запустить: " + e.Message; }
                     bool keep;
@@ -259,7 +275,8 @@ public sealed class Session : IDisposable
                             warnings = v.Warnings;
                             udpOk = v.UdpOk;
                             since = DateTime.Now;
-                            prep = v.Vless;
+                            prep = Adopt(st!, v.Vless);
+                            srvKey = currentServer;
                             // список изменили, пока запускались: те же правила — ничего; те же выходы — файлы; иначе перезапуск
                             bool changed = !ReferenceEquals(used, latest) && !SameRules(used, latest!);
                             hot = changed && SameExits(latest!, used);
@@ -268,12 +285,13 @@ public sealed class Session : IDisposable
                             else { state = ConnState.Connected; epoch++; if (hot) t = ++ticket; }
                         }
                     }
-                    if (!keep || fail != null) { m?.Dispose(); sb.Stop(); }
+                    if (!keep || fail != null) { m?.Dispose(); (st?.Api as IDisposable)?.Dispose(); sb.Stop(); }
                     if (!keep) return;
                 }
             }
             if (fail != null) { Raise(false, fail); return; }
             Raise(false, WithWarnings(ReopenMsg, v));
+            if (srvKey != null) ServerChanged?.Invoke(srvKey);
             if (restart) ScheduleRestart(t); // перезапуск проверит выходы заново
             else
             {
@@ -291,15 +309,17 @@ public sealed class Session : IDisposable
     {
         if (KeepRunning(t)) return;
         Settings snap;
+        string? cur;
         lock (gate)
         {
             if (t != ticket || state != ConnState.Restarting) return; // есть изменение новее или уже отключены
             snap = latest!;
+            cur = currentServer; // подписка: остаёмся на сервере, на котором работали (после ручного выбора он не равен Settings.Server)
         }
         // Вне блокировок: старый sing-box пока работает, AppsChanged и Disconnect в это время не ждут.
-        var v = CheckExits(snap);
+        var v = CheckExits(snap, cur, false);
 
-        string? fail = v.Error;
+        string? fail = v.Error, srvKey = null;
         bool connected = false;
         lock (ops)
         {
@@ -317,8 +337,9 @@ public sealed class Session : IDisposable
             sb.Stop(); // Exited отсюда приходит в Restarting или Disconnected и не считается ошибкой
             if (fail == null)
             {
+                Started? st = null;
                 TrafficMeter? m = null;
-                try { m = StartSingBox(snap, v, ct); }
+                try { st = StartSingBox(snap, v, ct, false); m = st.Meter; }
                 catch (CheckFailedException e) { fail = e.Message; }
                 catch (Exception e) { fail = "Не удалось запустить: " + e.Message; }
                 bool keep;
@@ -331,19 +352,21 @@ public sealed class Session : IDisposable
                     {
                         meter = m;
                         applied = snap;
-                        prep = v.Vless;
+                        prep = Adopt(st!, v.Vless);
                         live = v.Live;
                         warnings = v.Warnings;
                         udpOk = v.UdpOk;
+                        if (currentServer != cur) srvKey = currentServer; // выбранный сервер пропал из подписки
                         if (t == ticket) { state = ConnState.Connected; epoch++; connected = true; } // иначе впереди ещё перезапуск
                     }
                 }
-                if (!keep || fail != null) { m?.Dispose(); sb.Stop(); }
+                if (!keep || fail != null) { m?.Dispose(); (st?.Api as IDisposable)?.Dispose(); sb.Stop(); }
                 if (!keep) return;
             }
         }
         if (fail != null) Raise(false, RestartMsg, fail);
         else Raise(false, WithWarnings(RestartMsg, v));
+        if (srvKey != null) ServerChanged?.Invoke(srvKey);
         if (connected) OnExited();
     }
     // Выходы те же, что у запущенного sing-box (выключили и включили обратно, либо изменились только правила):
@@ -417,7 +440,7 @@ public sealed class Session : IDisposable
                     ok = t == ticket && state == ConnState.Connected;
                     if (ok)
                     {
-                        if (newPrep != null) prep = newPrep;
+                        if (newPrep != null) prep = prep == null ? newPrep : newPrep with { Selected = prep.Selected }; // выбор сервера мог смениться за время скачивания
                         if (err == null) { applied = snap; first ??= prev; last = snap; }
                     }
                 }
@@ -462,9 +485,10 @@ public sealed class Session : IDisposable
 
     // Проверяет только нужные выходы снимка: прокси (Ip, Port) — при программах «Через прокси», «Мимо Podkop»
     // (Ip, DirectPort) — при её программах и указанном порте. Оба сразу, до ~3 с каждый: вызывать вне блокировок.
-    Verdict CheckExits(Settings snap)
+    // current — сервер подписки, на котором уже работаем (перезапуск); connecting — подключение (подписку можно скачать)
+    Verdict CheckExits(Settings snap, string? current, bool connecting)
     {
-        if (snap.Mode == ProxyMode.Vless) return CheckVless(snap);
+        if (snap.Mode == ProxyMode.Vless) return CheckVless(snap, current, connecting);
         var (needProxy, needBypass) = Needs(snap);
         var bypass = needBypass && snap.DirectPort is int dp ? Task.Run(() => SafeProbe(snap.Ip, dp)) : null;
         var proxy = needProxy ? SafeProbe(snap.Ip, snap.Port) : null;
@@ -502,9 +526,10 @@ public sealed class Session : IDisposable
     // VLESS до запуска: IP сервера (системным DNS, туннеля ещё нет), TCP до него, копии списков. TCP до ~3 с,
     // списки качаются с GitHub: вызывать вне блокировок. Исключения подмен наружу не выходят (иначе Connect
     // или Restart оборвался бы и состояние осталось бы в Checking/Restarting).
-    Verdict CheckVless(Settings snap)
+    Verdict CheckVless(Settings snap, string? current, bool connecting)
     {
         if (vless == null) return ErrorVerdict("Режим VLESS недоступен");
+        if (Settings.IsSubscription(snap.VlessLink)) return CheckSubscription(snap, current, connecting);
         Server? srv; string? linkError;
         try { (srv, linkError) = vless.Decode(snap.VlessLink); }
         catch (Exception e) { (srv, linkError) = (null, e.Message); }
@@ -527,14 +552,81 @@ public sealed class Session : IDisposable
         try { proxy = ConfigBuilder.ProxyOutbound(srv, ip); }
         catch (Exception e) { return ErrorVerdict("Ссылка не подходит: " + e.Message); }
 
+        return WithLists(snap, new VlessPrep([ip], [proxy], null, new Dictionary<string, string>(), new Dictionary<string, string>()));
+    }
+
+    // Копии списков сайтов (через выбранный сервер) и итог проверки.
+    Verdict WithLists(Settings snap, VlessPrep basis)
+    {
         var lists = new ListsResult(new Dictionary<string, string>(), [], []);
         if (snap.Lists.Count > 0)
         {
-            try { lists = vless.PrepareLists(snap.Lists, proxy); }
+            try { lists = vless!.PrepareLists(snap.Lists, basis.FetchProxy); }
             catch { lists = lists with { Failed = snap.Lists.ToList() }; } // не смогли даже начать: ни один не скачался
         }
         foreach (var id in lists.Stale) Log?.Invoke($"Список {ListName(id)} не обновился, работаю со старой копией");
-        return EvaluateVless(snap, new VlessPrep([ip], [proxy], null, lists.Files, new Dictionary<string, string>()), lists);
+        return EvaluateVless(snap, basis, lists);
+    }
+
+    // Подписка до запуска: кэш (при подключении устаревший или отсутствующий — скачиваем), IP серверов, выбранный сервер.
+    // Скачивание до ~15 с и DNS: вызывать вне блокировок. При перезапуске подписку не обновляем.
+    Verdict CheckSubscription(Settings snap, string? current, bool connecting)
+    {
+        var url = snap.VlessLink.Trim();
+        SubCache? cache;
+        try { cache = vless!.LoadSub(url); }
+        catch { cache = null; }
+        if (connecting && (cache == null || SubStore.Stale(cache, DateTime.UtcNow)))
+        {
+            SubCache? fresh; string? err;
+            try { (fresh, err) = vless!.FetchSub(url, cache); }
+            catch (Exception e) { (fresh, err) = (null, e.Message); }
+            if (fresh != null) cache = fresh;
+            else if (cache != null) Log?.Invoke("Подписка не обновилась, работаю по копии: " + (err ?? "нет ответа"));
+            else return ErrorVerdict(err ?? "Подписка не скачалась");
+        }
+        if (cache == null) return ErrorVerdict("Нет копии подписки");
+        var sup = cache.Servers.Where(s => s.Server != null).ToList();
+        if (sup.Count == 0) return ErrorVerdict("В подписке нет серверов, которые ViviTune умеет");
+
+        // DNS, не сервер: можно параллельно
+        var ips = new IPAddress?[sup.Count];
+        Task.WaitAll(sup.Select((s, i) => Task.Run(() =>
+        {
+            var host = s.Server!.Host;
+            if (IPAddress.TryParse(host, out var lit)) { ips[i] = lit; return; }
+            try { ips[i] = vless!.Resolve(host); }
+            catch { ips[i] = null; }
+        })).ToArray());
+        var items = new List<(SubServer S, IPAddress Ip, JsonObject Ob)>();
+        for (int i = 0; i < sup.Count; i++)
+        {
+            if (ips[i] is not { } ip) continue; // не разрешился — не входит в конфиг
+            try
+            {
+                var o = ConfigBuilder.ProxyOutbound(sup[i].Server!, ip);
+                o["tag"] = "s" + items.Count;
+                items.Add((sup[i], ip, o));
+            }
+            catch { } // сервер, который не собрать в outbound, пропускаем
+        }
+        if (items.Count == 0) return ErrorVerdict("Ни один сервер подписки не найден");
+
+        int sel = items.FindIndex(x => x.S.Key == current);
+        if (sel < 0) sel = items.FindIndex(x => x.S.Key == snap.Server);
+        if (sel < 0) sel = 0;
+        var chosen = items[sel];
+        if (!snap.AutoServer && !chosen.S.Server!.Udp) // с галкой выберем по пингу; у UDP-протоколов TCP-проверка бессмысленна
+        {
+            string? down;
+            try { down = vless!.Reach(chosen.Ip, chosen.S.Server.Port); }
+            catch (Exception e) { down = e.Message; }
+            if (down != null) return ErrorVerdict("Сервер не отвечает: " + down);
+        }
+        var keys = new Dictionary<string, string>();
+        foreach (var x in items) keys[(string)x.Ob["tag"]!] = x.S.Key;
+        var basis = new VlessPrep(items.Select(x => x.Ip).Distinct().ToList(), items.Select(x => x.Ob).ToList(), "s" + sel, new Dictionary<string, string>(), keys);
+        return WithLists(snap, basis);
     }
 
     // Сервер VLESS ответил. Не загрузившийся список — предупреждение; нет ни программ, ни одного файла списка —
@@ -555,7 +647,13 @@ public sealed class Session : IDisposable
 
     // Вызывать под ops. В VLESS после запуска — проверка сервера и DNS через Clash API (ct отменяет её при Disconnect);
     // не прошла — CheckFailedException, sing-box останавливает вызывающий. Счётчик скорости — только после неё.
-    TrafficMeter StartSingBox(Settings snap, Verdict v, CancellationToken ct)
+    // Api — клиент Clash API (подписка); Picked — тег, выбранный автовыбором (null — остался прежний);
+    // Pings — его пинги по тегам (null — автовыбора не было).
+    sealed record Started(TrafficMeter Meter, IClashApi? Api, string? Picked, IReadOnlyDictionary<string, int?>? Pings);
+
+    // В подписке с галкой при подключении (не перезапуске): до AfterStart пингуем серверы по очереди и берём самый быстрый.
+    // Disconnect отменяет пинги через ct; если никто не ответил или отменили — остаётся выбранный.
+    Started StartSingBox(Settings snap, Verdict v, CancellationToken ct, bool connecting)
     {
         int port = FreePort();
         var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
@@ -564,12 +662,94 @@ public sealed class Session : IDisposable
             ? ConfigBuilder.BuildVless(snap, port, secret, p, rulesDir)
             : ConfigBuilder.Build(snap, port, secret, rulesDir, v.Live));
         sb.Start(configPath);
-        if (v.Vless != null && vless!.AfterStart(port, secret, ct) is { } err)
-            throw new CheckFailedException(err);
-        var m = new TrafficMeter(port, secret);
-        m.Sample += s => OnSample(m, s);
-        m.Start();
-        return m;
+        IClashApi? clash = null;
+        try
+        {
+            string? picked = null;
+            IReadOnlyDictionary<string, int?>? pings = null;
+            if (v.Vless is { Selected: not null } sub)
+            {
+                clash = vless!.Api(port, secret);
+                if (connecting && snap.AutoServer)
+                {
+                    pings = Pinger.Ping(clash, sub.Outbounds.Select(o => (string)o["tag"]!).ToList(), vless.PingMs, vless.PingCap, null, ct);
+                    var best = ct.IsCancellationRequested ? null : Pinger.Fastest(pings);
+                    if (best == sub.Selected) picked = best;
+                    else if (best != null && clash.Select("proxy", best)) picked = best;
+                }
+            }
+            if (v.Vless != null && vless!.AfterStart(port, secret, ct) is { } err)
+                throw new CheckFailedException(err);
+            var m = new TrafficMeter(port, secret);
+            m.Sample += s => OnSample(m, s);
+            m.Start();
+            return new Started(m, clash, picked, pings);
+        }
+        catch
+        {
+            (clash as IDisposable)?.Dispose();
+            throw;
+        }
+    }
+
+    // Под gate: что запомнить о запущенном sing-box; возвращает prep с актуальным выбранным сервером.
+    VlessPrep? Adopt(Started st, VlessPrep? p)
+    {
+        (api as IDisposable)?.Dispose();
+        api = st.Api;
+        if (p?.Selected == null) { currentServer = null; return p; }
+        var tag = st.Picked ?? p.Selected;
+        currentServer = p.Keys.GetValueOrDefault(tag);
+        if (st.Pings != null)
+            pings = st.Pings.Where(kv => p.Keys.ContainsKey(kv.Key)).ToDictionary(kv => p.Keys[kv.Key], kv => kv.Value);
+        return p with { Selected = tag };
+    }
+
+    // Переключение сервера подписки без перезапуска (Clash API). Вызывать не в UI-потоке.
+    public bool SelectServer(string key)
+    {
+        IClashApi a; string tag; int e;
+        lock (gate)
+        {
+            if (state != ConnState.Connected || api == null || prep is not { Selected: not null } p) return false;
+            var kv = p.Keys.FirstOrDefault(x => x.Value == key);
+            if (kv.Key == null) return false;
+            a = api; tag = kv.Key; e = epoch;
+        }
+        bool ok;
+        try { ok = a.Select("proxy", tag); }
+        catch { ok = false; }
+        if (!ok) return false;
+        lock (gate)
+        {
+            if (state != ConnState.Connected || epoch != e) return false; // пока переключали, отключили или перезапустили
+            prep = prep! with { Selected = tag };
+            currentServer = key;
+        }
+        ServerChanged?.Invoke(key);
+        return true;
+    }
+
+    // Пинг всех серверов подписки по очереди через запущенный sing-box; Pings обновляются по одному.
+    public bool PingConnected(CancellationToken ct)
+    {
+        IClashApi a; VlessPrep p; int e;
+        lock (gate)
+        {
+            if (state != ConnState.Connected || api == null || prep is not { Selected: not null } p0) return false;
+            a = api; p = p0; e = epoch;
+        }
+        Pinger.Ping(a, p.Outbounds.Select(o => (string)o["tag"]!).ToList(), vless!.PingMs, null, (tag, ms) =>
+        {
+            if (ct.IsCancellationRequested) return; // отменённый пинг не ответ
+            lock (gate)
+            {
+                if (state != ConnState.Connected || epoch != e) return;
+                pings = new Dictionary<string, int?>(pings) { [p.Keys[tag]] = ms };
+            }
+            PingsChanged?.Invoke();
+        }, ct);
+        return true;
     }
 
     // Также проверка «жив ли sing-box» сразу после входа в Connected.
@@ -616,6 +796,10 @@ public sealed class Session : IDisposable
         error = err;
         udpOk = null;
         prep = null;
+        (api as IDisposable)?.Dispose();
+        api = null;
+        currentServer = null;
+        pings = new Dictionary<string, int?>();
         live = default;
         warnings = [];
         since = null;
