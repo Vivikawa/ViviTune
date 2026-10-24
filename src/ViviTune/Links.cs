@@ -82,7 +82,7 @@ namespace ViviTune
         }
 
         // Ссылка уходит в stdin (секрет, не в командную строку), UTF-8 без BOM
-        public static Func<string, (int Code, string Out, string Err)> Engine(string singBoxExe) => link =>
+        public static Func<string, (int Code, string Out, string Err)> Engine(string singBoxExe, int timeoutMs = 10_000) => link =>
         {
             var utf8 = new UTF8Encoding(false);
             var psi = new ProcessStartInfo(singBoxExe)
@@ -98,7 +98,7 @@ namespace ViviTune
             var e = p.StandardError.ReadToEndAsync();
             p.StandardInput.Write(link);
             p.StandardInput.Close();
-            p.WaitForExit();
+            if (!p.WaitForExit(timeoutMs)) { try { p.Kill(true); } catch { } throw new TimeoutException("sing-box не ответил"); }
             return (p.ExitCode, o.Result, e.Result);
         };
     }

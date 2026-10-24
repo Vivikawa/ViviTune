@@ -15,8 +15,10 @@ static class Program
         Console.WriteLine((ok ? "ok:   " : "FAIL: ") + name);
     }
 
-    static int Main()
+    static int Main(string[] args)
     {
+        // Зависший «движок» для проверки таймаута Links.Engine: сам тестовый exe с аргументами decode-link
+        if (args.Length > 0 && args[0] == "tools") { Thread.Sleep(Timeout.Infinite); return 0; }
         SettingsTests();
         ConfigTests();
         ProbeTests();
@@ -316,6 +318,14 @@ static class Program
         int calls = 0;
         Check(Links.Decode("  ", _ => { calls++; return (0, "", ""); }, out e) == null && e == "Вставьте ссылку в настройках" && calls == 0, "Links: пусто — без движка");
         Check(Links.Decode("просто текст", _ => { calls++; return (0, "", ""); }, out e) == null && e == "Это не ссылка" && calls == 0, "Links: не ссылка — без движка");
+
+        var self = Environment.ProcessPath;
+        if (self != null && !Path.GetFileName(self).Equals("dotnet.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Check(Links.Decode("vless://x", Links.Engine(self, 500), out e) == null && e == "sing-box не разобрал ссылку: sing-box не ответил" && sw.Elapsed < TimeSpan.FromSeconds(8), "Links: зависший движок — таймаут, ошибка");
+        }
+        else Check(false, "Links: тест таймаута требует apphost тестов");
 
         var exe = SingBoxExe();
         if (exe == null) { Check(false, "sing-box.exe рядом с тестами"); return; }
