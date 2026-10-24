@@ -114,7 +114,7 @@ namespace ViviTune
                     o["warnings"] = new JsonArray(s.Server.Warnings.Select(w => (JsonNode?)JsonValue.Create(w)).ToArray());
                 }
                 if (s.Error != null) o["error"] = s.Error;
-                servers.Add(o);
+                servers.Add((JsonNode)o);
             }
             var i = c.Info;
             var root = new JsonObject
