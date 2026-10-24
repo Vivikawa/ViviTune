@@ -247,9 +247,13 @@ namespace ViviTune.Ui
             }
             detailTimer.Tick += (_, _) => UpdateDetail();
 
+            // Окошко над треем: одно за раз. «Не отвечает» устаревает, как только подключение кончилось или сервер сменился
+            ServerAlert? alert = null; bool alertDown = false; // только UI-поток
+            void CloseDownAlert() { if (alertDown) alert?.Close(); }
             void Sync()
             {
                 state.State = session.State;
+                if (!ServerAlert.DownStillValid(session.State)) CloseDownAlert();
                 state.ErrorText = session.Error;
                 state.WarningText = session.Warnings.Count > 0 ? string.Join("\n", session.Warnings) : null;
                 bool live = state.State is ConnState.Connected or ConnState.Restarting;
@@ -273,6 +277,7 @@ namespace ViviTune.Ui
             // Сохраняем session.CurrentServer, а не аргумент: событие от подключения может прийти после быстрого ручного выбора
             session.ServerChanged += _ => Dispatcher.UIThread.Post(() =>
             {
+                CloseDownAlert(); // сервер сменился (вручную или watch): «не отвечает» больше не про него
                 if (session.CurrentServer is not { } cur) return;
                 settings.Server = cur;
                 Save();
@@ -482,26 +487,26 @@ namespace ViviTune.Ui
                 window.Activate();
             }
             // Окошко над треем: одно за раз, новое событие закрывает старое. Имена — из строк списка, иначе часть ключа до «|»
-            ServerAlert? alert = null; // только UI-поток
             string NameOf(string key) => state.Servers.FirstOrDefault(r => r.Key == key)?.Name ?? key.Split('|')[0];
-            void ShowAlert(ServerAlert w)
+            void ShowAlert(ServerAlert w, bool down)
             {
                 alert?.Close();
-                alert = w;
-                w.Closed += (_, _) => { if (alert == w) alert = null; };
+                alert = w; alertDown = down;
+                w.Closed += (_, _) => { if (alert == w) { alert = null; alertDown = false; } };
                 w.Show();
             }
             session.ServerDown += (cur, best, ms) => Dispatcher.UIThread.Post(() =>
             {
+                if (!ServerAlert.DownStillValid(session.State)) return; // пока ждали UI-поток, подключение кончилось
                 var t = ServerAlert.DownText(NameOf(cur), best == null ? null : NameOf(best), ms);
                 ShowAlert(new ServerAlert(t.Title, t.Text, t.Best,
                     best == null ? null : () => state.RequestSelectServer(best), // та же очередь, что у списка серверов
-                    () => { ShowWindow(); window.ShowPage(NavPage.Settings); }, null));
+                    () => { ShowWindow(); window.ShowPage(NavPage.Settings); }, null), true);
             });
             session.ServerSwitched += (from, to, ms) => Dispatcher.UIThread.Post(() =>
             {
                 var t = ServerAlert.SwitchedText(NameOf(from), NameOf(to), ms);
-                ShowAlert(new ServerAlert(t.Title, t.Text, null, null, null, TimeSpan.FromSeconds(10)));
+                ShowAlert(new ServerAlert(t.Title, t.Text, null, null, null, TimeSpan.FromSeconds(10)), false);
             });
             var openItem = new NativeMenuItem("Открыть");
             openItem.Click += (_, _) => ShowWindow();

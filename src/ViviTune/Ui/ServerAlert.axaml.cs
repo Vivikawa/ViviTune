@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
+using ViviTune.Windows;
 
 namespace ViviTune.Ui
 {
@@ -14,6 +15,9 @@ namespace ViviTune.Ui
 
         public static (string Title, string Text) SwitchedText(string from, string to, int ms) =>
             ("Сервер переключён", $"{from} не отвечал — теперь {to} · {ms} мс.");
+
+        // «Не отвечает» имеет смысл только при подключении
+        public static bool DownStillValid(ConnState s) => s == ConnState.Connected;
 
         public ServerAlert() => AvaloniaXamlLoader.Load(this); // для загрузчика XAML
 

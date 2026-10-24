@@ -579,6 +579,7 @@ static class Program
         Check(ServerAlert.DownText("🇩🇪 Германия #2", "🇳🇱 Нидерланды", 48) == ("Сервер не отвечает", "🇩🇪 Германия #2 не отвечает уже 1,5 минуты. Выберите другой сервер.", "🇳🇱 Нидерланды · 48 мс"), "текст «не отвечает»");
         Check(ServerAlert.DownText("A", null, null).Best == null, "без лучшего — без кнопки");
         Check(ServerAlert.SwitchedText("🇩🇪 Германия #2", "🇳🇱 Нидерланды", 48) == ("Сервер переключён", "🇩🇪 Германия #2 не отвечал — теперь 🇳🇱 Нидерланды · 48 мс."), "текст «переключён»");
+        Check(ServerAlert.DownStillValid(ConnState.Connected) && !ServerAlert.DownStillValid(ConnState.Disconnected) && !ServerAlert.DownStillValid(ConnState.Restarting), "«не отвечает» живёт только при Connected");
     }
 
     static void ServerWatchTests()

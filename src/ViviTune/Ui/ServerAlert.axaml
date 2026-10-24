@@ -8,6 +8,7 @@
         CanResize="False"
         ShowInTaskbar="False"
         Topmost="True"
+        ShowActivated="False"
         WindowDecorations="None"
         Background="{StaticResource CardBrush}"
         Foreground="{StaticResource TextBrush}"
