@@ -440,11 +440,43 @@ static class Program
                 ss.ServerSwitched += (f, t, m) => { lock (sw) sw.Add((f, t, m)); };
                 ss.ConnectAsync().Wait(2000); // автовыбор: s2
                 api.Delays["s2"] = 200;       // s2 станет медленнее s0
+                api.Delays["s0"] = 77;
+                int pc = 0; ss.PingsChanged += () => Interlocked.Increment(ref pc);
                 lock (api.Calls) for (int i = 0; i < 3; i++) api.Proxy.Enqueue(null);
                 bool got = Until(() => { lock (sw) return sw.Count > 0; });
                 lock (sw) lock (changed)
-                    Check(got && sw[0] == (K2, K0, 120) && ss.CurrentServer == K0 && changed.Last() == K0 && api.Selected == ("proxy", "s0"),
+                    Check(got && sw[0] == (K2, K0, 77) && ss.CurrentServer == K0 && changed.Last() == K0 && api.Selected == ("proxy", "s0"),
                         "watch в Session: переключение обновляет CurrentServer, ServerChanged и ServerSwitched");
+                Check(ss.Pings[K0] == 77 && pc > 0, "пинги watch попадают в Session.Pings и PingsChanged");
+            }
+            {
+                // галку включили уже при подключении: watch читает её вживую - переключение, не Down
+                var fb = new FakeSingBox(); var api = new FakeApi { Delays = { ["s0"] = 120, ["s2"] = 40, ["proxy"] = 30 } };
+                var fv = new FakeVless(root, cache: Cache(), api: api, watchEvery: TimeSpan.FromMilliseconds(20));
+                var sw = new List<(string, string, int)>(); int downs = 0;
+                using var ss = new Session(Sub(K1), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ServerSwitched += (f, t, m) => { lock (sw) sw.Add((f, t, m)); };
+                ss.ServerDown += (_, _, _) => Interlocked.Increment(ref downs);
+                ss.ConnectAsync().Wait(2000);
+                ss.AutoServer = true;
+                lock (api.Calls) for (int i = 0; i < 3; i++) api.Proxy.Enqueue(null);
+                bool got = Until(() => { lock (sw) return sw.Count > 0; });
+                lock (sw) Check(got && sw[0] == (K1, K2, 40) && downs == 0 && ss.CurrentServer == K2, "Session.AutoServer вживую: переключение, не Down");
+            }
+            {
+                // ручной выбор, пока watch пингует: watch после него не переключает
+                var fb = new FakeSingBox(); var api = new FakeApi { Wait = TimeSpan.FromMilliseconds(100), Delays = { ["s0"] = 120, ["s2"] = 40, ["proxy"] = 30 } };
+                var fv = new FakeVless(root, cache: Cache(), api: api, watchEvery: TimeSpan.FromMilliseconds(20));
+                int switches = 0;
+                using var ss = new Session(Sub(K1), fb, NewCfg(), Up, Delay, fv.Deps);
+                ss.ServerSwitched += (_, _, _) => Interlocked.Increment(ref switches);
+                ss.ConnectAsync().Wait(2000);
+                ss.AutoServer = true;
+                lock (api.Calls) for (int i = 0; i < 3; i++) api.Proxy.Enqueue(null);
+                bool pinging = Until(() => { lock (api.Calls) return api.Calls.Contains("s0"); });
+                bool ok = ss.SelectServer(K0);
+                Thread.Sleep(500);
+                Check(pinging && ok && switches == 0 && api.Selected == ("proxy", "s0") && ss.CurrentServer == K0, "ручной выбор во время пингов watch не перебивается");
             }
             {
                 // без галки: ServerDown с ключом; ручной SelectServer сбрасывает счётчик и «уже сообщали»

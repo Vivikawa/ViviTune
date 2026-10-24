@@ -19,8 +19,12 @@ public sealed class ServerWatch : IDisposable
     readonly TimeSpan cap;
     readonly SemaphoreSlim pingGate;
     readonly Func<IReadOnlyDictionary<string, int?>>? lastPings; // последние пинги по тегам (без галки Down предлагает лучший)
+    // переключение (вместе с обновлением состояния Session); зовётся под sync, только если Reset не было с начала проверки
+    readonly Func<string, bool> select;
+    readonly Action<string, int?>? onPing; // результат каждого пинга при автопереключении
     readonly CancellationTokenSource cts = new();
     readonly object sync = new();
+    int gen; // растёт в Reset: проверка, начатая до него, ничего не переключает и не сообщает
     int fails;
     bool reported;
     volatile bool disposed;
@@ -29,8 +33,11 @@ public sealed class ServerWatch : IDisposable
     public event Action<string, string, int>? Switched;
 
     public ServerWatch(IClashApi api, IReadOnlyList<string> tags, Func<string> current, Func<bool> auto, TimeSpan interval, int pingMs, TimeSpan cap,
-        SemaphoreSlim? pingGate = null, Func<IReadOnlyDictionary<string, int?>>? lastPings = null)
+        SemaphoreSlim? pingGate = null, Func<IReadOnlyDictionary<string, int?>>? lastPings = null,
+        Func<string, bool>? select = null, Action<string, int?>? onPing = null)
     {
+        this.select = select ?? (t => api.Select("proxy", t));
+        this.onPing = onPing;
         this.api = api; this.tags = tags; this.current = current; this.auto = auto;
         this.interval = interval; this.pingMs = pingMs; this.cap = cap;
         this.pingGate = pingGate ?? new SemaphoreSlim(1, 1);
@@ -39,7 +46,7 @@ public sealed class ServerWatch : IDisposable
 
     public void Reset()
     {
-        lock (sync) { fails = 0; reported = false; }
+        lock (sync) { gen++; fails = 0; reported = false; } // ждёт переключение, которое уже идёт (оно под sync)
     }
 
     public void Start() => _ = Loop(cts.Token);
@@ -58,7 +65,8 @@ public sealed class ServerWatch : IDisposable
 
     void Tick(CancellationToken ct)
     {
-        int? d;
+        int? d; int g;
+        lock (sync) g = gen;
         pingGate.Wait(ct);
         try { d = api.Delay("proxy", ProxyMs, ct); }
         catch { d = null; }
@@ -66,6 +74,7 @@ public sealed class ServerWatch : IDisposable
         if (disposed) return;
         lock (sync)
         {
+            if (g != gen) return;
             if (d != null) { fails = 0; reported = false; return; }
             if (++fails < Fails || reported) return;
         }
@@ -74,33 +83,41 @@ public sealed class ServerWatch : IDisposable
         {
             IReadOnlyDictionary<string, int?> pings;
             pingGate.Wait(ct);
-            try { pings = Pinger.Ping(api, tags.Where(t => t != cur).ToList(), pingMs, cap, null, ct); }
+            try { pings = Pinger.Ping(api, tags.Where(t => t != cur).ToList(), pingMs, cap, onPing, ct); }
             finally { pingGate.Release(); }
             if (disposed) return;
             var best = Pinger.Fastest(pings, cur);
             bool ok;
-            try { ok = best != null && api.Select("proxy", best); }
-            catch { ok = false; }
+            lock (sync)
+            {
+                if (g != gen) return; // пока пинговали, сервер выбрали вручную
+                try { ok = best != null && select(best); }
+                catch { ok = false; }
+                if (ok) { fails = 0; reported = false; }
+            }
             if (disposed) return;
             if (ok)
             {
-                lock (sync) { fails = 0; reported = false; }
                 Switched?.Invoke(cur, best!, pings[best!]!.Value);
                 return;
             }
-            Report(cur, null, null);
+            Report(cur, null, null, g);
         }
         else
         {
             var last = lastPings?.Invoke();
             var best = last == null ? null : Pinger.Fastest(last, cur);
-            Report(cur, best, best == null ? null : last![best]);
+            Report(cur, best, best == null ? null : last![best], g);
         }
     }
 
-    void Report(string cur, string? best, int? ms)
+    void Report(string cur, string? best, int? ms, int g)
     {
-        lock (sync) reported = true;
+        lock (sync)
+        {
+            if (g != gen) return;
+            reported = true;
+        }
         Down?.Invoke(cur, best, ms);
     }
 

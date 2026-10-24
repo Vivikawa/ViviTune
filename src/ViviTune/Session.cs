@@ -127,6 +127,8 @@ public sealed class Session : IDisposable
     public event Action<Speed>? Speed;
     public event Action<string>? ServerChanged; // ключ текущего сервера подписки (вне gate)
     public event Action? PingsChanged;          // вне gate
+    volatile bool autoServer;                   // галка «самый быстрый» сейчас; пока подключены, её меняет UI
+    public bool AutoServer { get => autoServer; set { lock (gate) autoServer = value; } }
     public event Action<string, string?, int?>? ServerDown;   // (ключ текущего, ключ лучшего или null, его пинг); вне gate
     public event Action<string, string, int>? ServerSwitched; // (было, стало, пинг): сервер переключил watch; вне gate
     public string? CurrentServer { get { lock (gate) return currentServer; } }
@@ -164,6 +166,7 @@ public sealed class Session : IDisposable
             {
                 state = ConnState.Checking;
                 latest = snap;
+                autoServer = snap.AutoServer;
                 a = ++attempt;
             }
         }
@@ -722,9 +725,30 @@ public sealed class Session : IDisposable
         ServerWatch? w = null;
         w = new ServerWatch(a, tags,
             () => { lock (gate) return prep?.Selected ?? ""; },
-            () => { lock (gate) return applied?.AutoServer ?? false; },
+            () => AutoServer,
             vless!.WatchEvery, vless.PingMs, vless.PingCap, pingGate,
-            () => { lock (gate) return p.Keys.Where(kv => pings.ContainsKey(kv.Value)).ToDictionary(kv => kv.Key, kv => pings[kv.Value]); });
+            () => { lock (gate) return p.Keys.Where(kv => pings.ContainsKey(kv.Value)).ToDictionary(kv => kv.Key, kv => pings[kv.Value]); },
+            tag => // под sync watch: Reset (ручной выбор) ждёт, пока это переключение и обновление состояния закончатся
+            {
+                var key = p.Keys.GetValueOrDefault(tag);
+                if (key == null || !a.Select("proxy", tag)) return false;
+                lock (gate)
+                {
+                    if (watch != w || state != ConnState.Connected || prep == null) return true; // отключили: переключать уже некому
+                    prep = prep with { Selected = tag };
+                    currentServer = key;
+                }
+                return true;
+            },
+            (tag, ms) =>
+            {
+                lock (gate)
+                {
+                    if (watch != w || state != ConnState.Connected || !p.Keys.TryGetValue(tag, out var k)) return;
+                    pings = new Dictionary<string, int?>(pings) { [k] = ms };
+                }
+                PingsChanged?.Invoke();
+            });
         w.Down += (cur, best, ms) =>
         {
             lock (gate) if (watch != w || state != ConnState.Connected) return;
@@ -732,16 +756,11 @@ public sealed class Session : IDisposable
         };
         w.Switched += (from, to, ms) =>
         {
-            string? fromKey, toKey = p.Keys.GetValueOrDefault(to);
+            var toKey = p.Keys.GetValueOrDefault(to);
             lock (gate)
-            {
-                if (watch != w || state != ConnState.Connected || toKey == null || prep == null) return;
-                fromKey = currentServer;
-                prep = prep with { Selected = to };
-                currentServer = toKey;
-            }
+                if (watch != w || state != ConnState.Connected || toKey == null || currentServer != toKey) return; // состояние уже обновил select; ручной выбор после него — не объявляем
             ServerChanged?.Invoke(toKey);
-            ServerSwitched?.Invoke(fromKey ?? p.Keys.GetValueOrDefault(from) ?? from, toKey, ms);
+            ServerSwitched?.Invoke(p.Keys.GetValueOrDefault(from) ?? from, toKey, ms);
         };
         watch = w;
         w.Start();
@@ -750,14 +769,16 @@ public sealed class Session : IDisposable
     // Переключение сервера подписки без перезапуска (Clash API). Вызывать не в UI-потоке.
     public bool SelectServer(string key)
     {
-        IClashApi a; string tag; int e;
+        IClashApi a; string tag; int e; ServerWatch? w;
         lock (gate)
         {
             if (state != ConnState.Connected || api == null || prep is not { Selected: not null } p) return false;
             var kv = p.Keys.FirstOrDefault(x => x.Value == key);
             if (kv.Key == null) return false;
-            a = api; tag = kv.Key; e = epoch;
+            a = api; tag = kv.Key; e = epoch; w = watch;
         }
+        // до Select и вне gate: ждёт идущее переключение watch и отменяет начатое (оно под sync, а внутри берёт gate)
+        w?.Reset();
         bool ok;
         try { ok = a.Select("proxy", tag); }
         catch { ok = false; }
@@ -767,7 +788,6 @@ public sealed class Session : IDisposable
             if (state != ConnState.Connected || epoch != e) return false; // пока переключали, отключили или перезапустили
             prep = prep! with { Selected = tag };
             currentServer = key;
-            watch?.Reset();
         }
         ServerChanged?.Invoke(key);
         return true;
