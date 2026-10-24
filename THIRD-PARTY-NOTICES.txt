@@ -5,7 +5,8 @@ ViviTune распространяется под GNU GPL v3 (полный тек
 
   sing-box 1.14.3-pdk-1d47804 (sing-box.exe, отдельная программа)  GPL-3.0-or-later
       podkop-engine, форк sing-box от podkop-net.
-      Исходный код этой версии: https://github.com/podkop-net/sing-box/tree/1d47804dc7831d963936122e071573bd6619cd8b
+      Исходный код этой версии: https://github.com/Vivikawa/sing-box/tree/1d47804dc7831d963936122e071573bd6619cd8b
+      (зеркало https://github.com/podkop-net/sing-box, тег vivitune-2.3.0)
       ViviTune не связан с проектами sing-box и Podkop и не одобрен их авторами.
   .NET 10 runtime                                       MIT
   Avalonia 12.1.4                                       MIT

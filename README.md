@@ -137,7 +137,7 @@ uci commit podkop
 
 Нужны .NET SDK 10, Go 1.26+ и git.
 
-1. Соберите движок: `sh tools/build-sing-box.sh` (в Git Bash). Скрипт соберёт `sing-box.exe` из [podkop-engine](https://github.com/podkop-net/sing-box) и положит его в `src/ViviTune/third_party/`.
+1. Соберите движок: `sh tools/build-sing-box.sh` (в Git Bash). Скрипт соберёт `sing-box.exe` из [podkop-engine](https://github.com/podkop-net/sing-box) (код берёт из зеркала [Vivikawa/sing-box](https://github.com/Vivikawa/sing-box)) и положит его в `src/ViviTune/third_party/`.
 2. Тесты: `dotnet run --project src/ViviTune.Tests`.
 3. Сборка: `dotnet publish src/ViviTune -c Release -o artifacts/publish`. Получится один `ViviTune.exe`, рядом с ним `sing-box.exe` и файлы лицензий.
 
@@ -149,6 +149,6 @@ uci commit podkop
 
 ViviTune распространяется под [GNU GPL v3](LICENSE).
 
-В релиз входит `sing-box.exe` из podkop-engine: это форк sing-box 1.14.3 от команды podkop-net (GPL-3.0-or-later, Copyright © 2022 nekohasekai и авторы форка), собранный скриптом `tools/build-sing-box.sh` без изменений. Его исходный код: https://github.com/podkop-net/sing-box/tree/1d47804dc7831d963936122e071573bd6619cd8b. ViviTune — отдельный проект, он не связан ни с sing-box, ни с Podkop и не одобрен их авторами.
+В релиз входит `sing-box.exe` из podkop-engine: это форк sing-box 1.14.3 от команды podkop-net (GPL-3.0-or-later, Copyright © 2022 nekohasekai и авторы форка), собранный скриптом `tools/build-sing-box.sh` без изменений. Его исходный код: https://github.com/Vivikawa/sing-box/tree/1d47804dc7831d963936122e071573bd6619cd8b (зеркало podkop-net/sing-box, тег `vivitune-2.3.0`). ViviTune — отдельный проект, он не связан ни с sing-box, ни с Podkop и не одобрен их авторами.
 
 Лицензии остальных компонентов (.NET, Avalonia, SkiaSharp, шрифт Inter и др.) перечислены в [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
