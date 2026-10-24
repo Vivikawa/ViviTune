@@ -1585,6 +1585,7 @@ static class Program
         var added = new List<string>();
         sv.AddSitesRequested += a => added.AddRange(a);
         Check(SiteEntry.Split("a.com, b.com;c.com\r\nd.com  e.com").SequenceEqual(new[] { "a.com", "b.com", "c.com", "d.com", "e.com" }), "SiteEntry.Split: разделители");
+        Check(SiteEntry.Split("a.com b.com").SequenceEqual(new[] { "a.com", "b.com" }), "SiteEntry.Split: неразрывный пробел");
         var left = sv.RequestAddSites("example.com\nhttps://www.youtube.com/watch?v=1\n1.2.3.0/24");
         Check(left == "" && added.SequenceEqual(new[] { "example.com", "www.youtube.com", "1.2.3.0/24" }) && sv.SiteError == null, "ViewState.RequestAddSites: пачка нормализуется");
         added.Clear();

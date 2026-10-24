@@ -13,9 +13,9 @@ namespace ViviTune
         const string Whole = "Введите адрес целиком, например example.com";
         const string Bad = "Это не домен и не IP-адрес";
 
-        // Записи через пробелы, переводы строк, «,» и «;»
+        // Записи через любые пробельные символы (в т.ч. неразрывный пробел), «,» и «;»
         public static IReadOnlyList<string> Split(string text) =>
-            (text ?? "").Split([',', ';', ' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+            (text ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).SelectMany(w => w.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries)).ToList();
 
         // Нормализованная запись или null + текст ошибки.
         public static string? Parse(string input, out string? error)

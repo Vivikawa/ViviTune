@@ -28,12 +28,12 @@ namespace ViviTune.Ui
             AddButton.Click += (_, _) => OpenAddPanel();
             SiteAddButton.Click += (_, _) => AddSite();
             // Enter добавляет, Shift+Enter — новая строка
-            SiteInput.KeyDown += (_, e) =>
+            SiteInput.AddHandler(Avalonia.Input.InputElement.KeyDownEvent, (object? _, Avalonia.Input.KeyEventArgs e) =>
             {
                 if (e.Key != Avalonia.Input.Key.Enter || e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Shift)) return;
                 e.Handled = true;
                 AddSite();
-            };
+            }, Avalonia.Interactivity.RoutingStrategies.Tunnel); // раньше TextBox: он сам съедает Enter (AcceptsReturn)
             SiteInput.TextChanged += (_, _) => { if (!settingSiteText) State?.ClearSiteError(); };
             PickFileButton.Click += (_, _) => PickFile();
             SearchBox.TextChanged += (_, _) =>
