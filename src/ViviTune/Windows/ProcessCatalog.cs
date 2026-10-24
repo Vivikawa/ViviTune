@@ -57,12 +57,7 @@ public static class ProcessCatalog
         {
             using var icon = Icon.ExtractAssociatedIcon(exePath);
             if (icon == null) return null;
-            using var bmp = new Bitmap(32, 32, PixelFormat.Format32bppArgb);
-            using (var g = Graphics.FromImage(bmp))
-            {
-                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                g.DrawIcon(icon, new Rectangle(0, 0, 32, 32));
-            }
+            using var bmp = icon.ToBitmap(); // системный размер иконки, с прозрачностью; масштабирует Avalonia
             using var ms = new MemoryStream();
             bmp.Save(ms, ImageFormat.Png);
             return ms.ToArray();

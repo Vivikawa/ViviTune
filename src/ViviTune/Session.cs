@@ -281,7 +281,6 @@ public sealed class Session : IDisposable
         }
         // Вне блокировок: старый sing-box пока работает, AppsChanged и Disconnect в это время не ждут.
         var v = CheckExits(snap);
-        const string msg = RestartMsg;
 
         string? fail = v.Error;
         bool connected = false;
@@ -326,52 +325,30 @@ public sealed class Session : IDisposable
                 if (!keep) return;
             }
         }
-        if (fail != null) Raise(false, msg, fail);
-        else Raise(false, WithWarnings(msg, v));
+        if (fail != null) Raise(false, RestartMsg, fail);
+        else Raise(false, WithWarnings(RestartMsg, v));
         if (connected) OnExited();
     }
     // Выходы те же, что у запущенного sing-box (выключили и включили обратно, либо изменились только правила):
-    // не перезапускаем, соединения не рвутся. Под ops: перезапуск, который ещё идёт, сначала закончится и обновит applied.
-    // Файлы пишутся под ops, но не под gate (занятый файл — повторы до ~1 с, State читает UI).
+    // не перезапускаем, соединения не рвутся, правила дописывает HotApply. Под ops: перезапуск, который ещё идёт,
+    // сначала закончится и обновит applied.
     bool KeepRunning(int t)
     {
-        bool rewritten = false, reopen = false;
         lock (ops)
+        lock (gate)
         {
-            Settings snap;
-            VlessPrep? p;
-            lock (gate)
-            {
-                if (t != ticket || state != ConnState.Restarting || !SameExits(latest!, applied!)) return false;
-                snap = latest!;
-                p = prep;
-                if (SameRules(snap, applied!)) { state = ConnState.Connected; epoch++; }
-                // копий списков здесь не качаем: нет какой-то — пусть решает перезапуск
-                else if (snap.Mode == ProxyMode.Vless && !snap.Lists.All(id => p?.ListFiles.ContainsKey(id) == true)) return false;
-                else rewritten = true;
-            }
-            if (rewritten)
-            {
-                try { RuleFiles.Write(rulesDir, snap, p?.ListFiles ?? new Dictionary<string, string>()); }
-                catch { return false; } // перезапуск запишет файлы заново и сообщит об ошибке
-                lock (gate)
-                {
-                    if (t != ticket || state != ConnState.Restarting) return false; // файлы записаны, applied не трогаем
-                    var old = applied!.ProcessNames();
-                    reopen = snap.ProcessNames().Any(n => !old.Contains(n, StringComparer.OrdinalIgnoreCase));
-                    applied = snap;
-                    state = ConnState.Connected;
-                    epoch++;
-                }
-            }
+            if (t != ticket || state != ConnState.Restarting || !SameExits(latest!, applied!)) return false;
+            state = ConnState.Connected;
+            epoch++;
         }
-        Raise(false, rewritten ? HotMsg : null, reopen ? ReopenMsg : null);
+        Raise(false);
         OnExited(); // sing-box мог упасть, пока мы были в Restarting
+        HotApply(t);
         return true;
     }
 
     // Горячее применение: правила пишутся в файлы, sing-box перечитывает их сам. Вызывать без блокировок.
-    // t — номер AppsChanged (или Connect): отключение или изменение новее отменяет эту запись.
+    // t — номер AppsChanged (или Connect, или ненужного перезапуска): отключение или изменение новее отменяет эту запись.
     // Правки, не менявшие ticket (вернули к applied), сходятся здесь же: после записи смотрим на latest заново.
     // Файлы пишутся под ops, но не под gate; applied обновляется только после повторной проверки ticket/state.
     void HotApply(int t)

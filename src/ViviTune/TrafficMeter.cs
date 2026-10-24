@@ -58,7 +58,7 @@ public sealed class TrafficMeter : IDisposable
     readonly int port;
     // без системного прокси: запросы к 127.0.0.1 не должны уходить в прокси из настроек Windows
     readonly HttpClient http = new(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(1) };
-    CancellationTokenSource? cts;
+    readonly CancellationTokenSource cts = new();
 
     public event Action<Speed>? Sample;
 
@@ -68,25 +68,13 @@ public sealed class TrafficMeter : IDisposable
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", secret);
     }
 
-    public void Start()
-    {
-        if (cts != null) return;
-        cts = new CancellationTokenSource();
-        var token = cts.Token;
-        Task.Run(() => Loop(token));
-    }
+    // Один раз: Session запускает счётчик сразу после создания и только освобождает
+    public void Start() => Task.Run(() => Loop(cts.Token));
 
-    public void Stop()
-    {
-        var c = cts;
-        cts = null;
-        c?.Cancel();
-        c?.Dispose();
-    }
-
+    // Повторный вызов безопасен: Cancel и HttpClient.Dispose идемпотентны (cts без таймера освобождать незачем)
     public void Dispose()
     {
-        Stop();
+        cts.Cancel();
         http.Dispose();
     }
 

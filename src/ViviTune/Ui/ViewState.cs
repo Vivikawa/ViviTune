@@ -7,9 +7,28 @@ using Avalonia.Media.Imaging;
 
 namespace ViviTune.Ui;
 
+// Уведомления об изменении свойств для ViewState и строк списков.
+public abstract class Observable : INotifyPropertyChanged
+{
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    protected bool Set<T>(ref T field, T value, [CallerMemberName] string name = "")
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
+        field = value;
+        Notify(name);
+        return true;
+    }
+
+    protected void Notify(params string[] names)
+    {
+        foreach (var n in names) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
+    }
+}
+
 // Состояние окна для страниц. Меняется только в UI-потоке.
 // Действия пользователя страницы передают через Request*: App подписан на события, Session страницы не видят.
-public sealed class ViewState : INotifyPropertyChanged
+public sealed class ViewState : Observable
 {
     public const int HistoryMax = 60, LogMax = 500;
 
@@ -25,7 +44,6 @@ public sealed class ViewState : INotifyPropertyChanged
     string vlessHost = "", vlessLink = "", vlessSummary = "";
     bool vlessLinkError;
 
-    public event PropertyChangedEventHandler? PropertyChanged;
     public event Action? ToggleRequested;
     public event Action<string, bool>? AddAppRequested; // путь, в «Мимо Podkop» ли
     public event Action<string>? RemoveAppRequested;
@@ -322,28 +340,13 @@ public sealed class ViewState : INotifyPropertyChanged
         list.Add(value);
         while (list.Count > max) list.RemoveAt(0);
     }
-
-    bool Set<T>(ref T field, T value, [CallerMemberName] string name = "")
-    {
-        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
-        field = value;
-        Notify(name);
-        return true;
-    }
-
-    void Notify(params string[] names)
-    {
-        foreach (var n in names) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
-    }
 }
 
-public sealed class AppRow : INotifyPropertyChanged
+public sealed class AppRow : Observable
 {
     string name = "";
     Bitmap? icon;
     bool enabled = true;
-
-    public event PropertyChangedEventHandler? PropertyChanged;
 
     // Цвета плашки с буквой, если у программы нет иконки
     static readonly IBrush[] BadgeColors = new[] { "#5865f2", "#ea4335", "#1db954", "#2b88d8", "#f59e0b", "#8b5cf6", "#ec4899", "#14b8a6" }
@@ -354,11 +357,7 @@ public sealed class AppRow : INotifyPropertyChanged
     public string Name
     {
         get => name;
-        set
-        {
-            if (!Set(ref name, value)) return;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Letter)));
-        }
+        set { if (Set(ref name, value)) Notify(nameof(Letter)); }
     }
     public Bitmap? Icon { get => icon; set => Set(ref icon, value); }
     public bool Enabled { get => enabled; set => Set(ref enabled, value); }
@@ -378,26 +377,16 @@ public sealed class AppRow : INotifyPropertyChanged
             return BadgeColors[h % BadgeColors.Length];
         }
     }
-
-    bool Set<T>(ref T field, T value, [CallerMemberName] string n = "")
-    {
-        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
-        field = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
-        return true;
-    }
 }
 
 public sealed record SiteRow(string Value, string Display);
 
 public sealed record ListGroup(string Title, IReadOnlyList<ListRow> Rows);
 
-public sealed class ListRow : INotifyPropertyChanged
+public sealed class ListRow : Observable
 {
     readonly ItdogList list;
     bool enabled, covered;
-
-    public event PropertyChangedEventHandler? PropertyChanged;
 
     public ListRow(ItdogList list) => this.list = list;
 
@@ -408,17 +397,12 @@ public sealed class ListRow : INotifyPropertyChanged
     public bool Enabled
     {
         get => enabled;
-        set { if (enabled == value) return; enabled = value; Raise(nameof(Enabled), nameof(Shown)); }
+        set { if (Set(ref enabled, value)) Notify(nameof(Shown)); }
     }
     public bool Covered
     {
         get => covered;
-        set { if (covered == value) return; covered = value; Raise(nameof(Covered), nameof(Shown), nameof(Note)); }
+        set { if (Set(ref covered, value)) Notify(nameof(Shown), nameof(Note)); }
     }
     public bool Shown => enabled || covered;
-
-    void Raise(params string[] names)
-    {
-        foreach (var n in names) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
-    }
 }
