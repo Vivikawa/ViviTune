@@ -30,8 +30,23 @@ public sealed class VlessDeps
 // Проверка после запуска sing-box не прошла: текст для пользователя как есть, без «Не удалось запустить: ».
 public sealed class CheckFailedException(string message) : Exception(message);
 
-// Что нужно для запуска в VLESS: заранее разрешённый IP сервера, его outbound и копии списков (id -> файл .srs).
-public sealed record VlessPrep(IPAddress Server, JsonObject Proxy, IReadOnlyDictionary<string, string> ListFiles);
+// Что нужно для запуска в VLESS: заранее разрешённые IP серверов, их outbound'ы и копии списков (id -> файл .srs).
+// Одиночная ссылка: один outbound с тегом proxy, Selected null. Подписка: теги s0…sN, Selected — выбранный, Keys — тег -> ключ сервера.
+public sealed record VlessPrep(IReadOnlyList<IPAddress> Ips, IReadOnlyList<JsonObject> Outbounds, string? Selected,
+    IReadOnlyDictionary<string, string> ListFiles, IReadOnlyDictionary<string, string> Keys)
+{
+    // outbound для скачивания списков: одиночный как есть, у подписки — копия выбранного с тегом proxy
+    public JsonObject FetchProxy
+    {
+        get
+        {
+            if (Selected == null) return Outbounds[0];
+            var o = (JsonObject)Outbounds.First(x => (string?)x["tag"] == Selected).DeepClone();
+            o["tag"] = "proxy";
+            return o;
+        }
+    }
+}
 
 // Итог проверки выходов: какие живы, предупреждения (без префикса), ошибка (ни одного живого выхода с программами),
 // UDP прокси (null, если прокси не жив); Vless — только в режиме VLESS.
@@ -381,7 +396,7 @@ public sealed class Session : IDisposable
                     ListsResult r;
                     // ponytail: два PrepareLists могут редко идти параллельно (Disconnect+Connect во время скачивания, HotApply из Connect и из очереди):
                     // два временных sing-box разом идут на VLESS-сервер. Потолок принят; если мешает — один полёт вокруг PrepareLists.
-                    try { r = vless.PrepareLists(missing, p.Proxy); }
+                    try { r = vless.PrepareLists(missing, p.FetchProxy); }
                     catch { r = new ListsResult(new Dictionary<string, string>(), missing, []); } // ни один не скачался
                     foreach (var id in r.Stale) Log?.Invoke($"Список {ListName(id)} не обновился, работаю со старой копией");
                     foreach (var id in r.Failed) logs.Add($"{WarnPrefix}Список {ListName(id)} не загрузился");
@@ -519,16 +534,16 @@ public sealed class Session : IDisposable
             catch { lists = lists with { Failed = snap.Lists.ToList() }; } // не смогли даже начать: ни один не скачался
         }
         foreach (var id in lists.Stale) Log?.Invoke($"Список {ListName(id)} не обновился, работаю со старой копией");
-        return EvaluateVless(snap, ip, proxy, lists);
+        return EvaluateVless(snap, new VlessPrep([ip], [proxy], null, lists.Files, new Dictionary<string, string>()), lists);
     }
 
     // Сервер VLESS ответил. Не загрузившийся список — предупреждение; нет ни программ, ни одного файла списка —
     // ошибка: правил для sing-box нет. Предупреждения — в порядке lists.Failed.
-    public static Verdict EvaluateVless(Settings s, IPAddress server, JsonObject proxy, ListsResult lists)
+    public static Verdict EvaluateVless(Settings s, VlessPrep basis, ListsResult lists)
     {
         if (s.ProcessNames().Count == 0 && s.Sites.Count == 0 && lists.Files.Count == 0) return ErrorVerdict("Списки не загрузились");
         var w = lists.Failed.Select(id => $"Список {ListName(id)} не загрузился").ToList();
-        return new Verdict(new Exits(true, false), w, null, null, new VlessPrep(server, proxy, lists.Files));
+        return new Verdict(new Exits(true, false), w, null, null, basis with { ListFiles = lists.Files });
     }
 
     static Verdict ErrorVerdict(string error) => new(default, [], error, null);
@@ -546,7 +561,7 @@ public sealed class Session : IDisposable
         var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
         RuleFiles.Write(rulesDir, snap, v.Vless?.ListFiles ?? new Dictionary<string, string>());
         File.WriteAllText(configPath, v.Vless is { } p
-            ? ConfigBuilder.BuildVless(snap, port, secret, p.Proxy, p.Server, rulesDir)
+            ? ConfigBuilder.BuildVless(snap, port, secret, p, rulesDir)
             : ConfigBuilder.Build(snap, port, secret, rulesDir, v.Live));
         sb.Start(configPath);
         if (v.Vless != null && vless!.AfterStart(port, secret, ct) is { } err)

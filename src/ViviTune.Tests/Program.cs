@@ -34,6 +34,8 @@ static class Program
         SettingsV5Tests();
         CatalogsTests();
         VlessConfigTests();
+        SubscriptionConfigTests();
+        PingerTests();
         RuleFilesTests();
         ListStoreTests();
         VlessProbeTests();
@@ -72,7 +74,7 @@ static class Program
             var srv = IPAddress.Parse("203.0.113.5");
             var link = new Server("n", JsonNode.Parse("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"3f1c0a52-0000-4000-8000-000000000001\"}")!.AsObject(), []);
             var sv = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = new List<AppEntry> { new AppEntry { Path = @"C:\a\app.exe" } } };
-            string Bv() => ConfigBuilder.BuildVless(sv, 9090, "t", ConfigBuilder.ProxyOutbound(link, srv), srv, rd);
+            string Bv() => ConfigBuilder.BuildVless(sv, 9090, "t", Single(ConfigBuilder.ProxyOutbound(link, srv), srv), rd);
             Check(Lvl(Bv()) == "warn", "SingBoxLog: VLESS по умолчанию warn");
             sv.SingBoxLog = "debug";
             Check(Lvl(Bv()) == "debug", "SingBoxLog: VLESS debug");
@@ -264,6 +266,67 @@ static class Program
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
+    // одиночная ссылка, как её строит Session
+    static VlessPrep Single(JsonObject proxy, IPAddress ip) => new([ip], [proxy], null, new Dictionary<string, string>(), new Dictionary<string, string>());
+
+    sealed class FakeApi : IClashApi
+    {
+        public Dictionary<string, int?> Delays = new();
+        public List<string> Calls = new();
+        public int MaxParallel;
+        public TimeSpan Wait;
+        public (string Group, string Tag)? Selected;
+        int cur;
+        public int? Delay(string tag, int timeoutMs, CancellationToken ct)
+        {
+            var n = Interlocked.Increment(ref cur);
+            lock (Calls) { Calls.Add(tag); MaxParallel = Math.Max(MaxParallel, n); }
+            try { if (Wait > TimeSpan.Zero) Thread.Sleep(Wait); return Delays.TryGetValue(tag, out var d) ? d : null; }
+            finally { Interlocked.Decrement(ref cur); }
+        }
+        public bool Select(string group, string tag) { Selected = (group, tag); return true; }
+    }
+
+    static void PingerTests()
+    {
+        var api = new FakeApi { Delays = { ["s0"] = 120, ["s1"] = null, ["s2"] = 40 } };
+        var got = new List<string>();
+        var pings = Pinger.Ping(api, ["s0", "s1", "s2"], 3000, null, (t, _) => got.Add(t), CancellationToken.None);
+        Check(got.SequenceEqual(["s0", "s1", "s2"]) && api.Calls.SequenceEqual(["s0", "s1", "s2"]) && api.MaxParallel == 1, "Pinger: по очереди, по одному");
+        Check(pings["s1"] == null && pings["s2"] == 40, "Pinger: результаты");
+        Check(Pinger.Fastest(pings) == "s2" && Pinger.Fastest(pings, except: "s2") == "s0", "Fastest и except");
+        Check(Pinger.Fastest(new Dictionary<string, int?> { ["a"] = null }) == null, "Fastest: все null -> null");
+        var slow = new FakeApi { Wait = TimeSpan.FromMilliseconds(80) };
+        Check(Pinger.Ping(slow, ["a", "b", "c", "d", "e"], 3000, TimeSpan.FromMilliseconds(150), null, CancellationToken.None).Count < 5, "Pinger: cap обрывает очередь");
+        using var cts = new CancellationTokenSource(); cts.Cancel();
+        Check(Pinger.Ping(new FakeApi(), ["a", "b"], 3000, null, null, cts.Token).Count == 0, "Pinger: отмена -> ничего не проверяет");
+    }
+
+    static void SubscriptionConfigTests()
+    {
+        var ip1 = IPAddress.Parse("203.0.113.1"); var ip2 = IPAddress.Parse("203.0.113.2"); var ip3 = IPAddress.Parse("2001:db8::3");
+        JsonObject O(string t, IPAddress ip) => JsonNode.Parse($"{{\"type\":\"vless\",\"tag\":\"{t}\",\"server\":\"{ip}\",\"server_port\":443,\"uuid\":\"3f1c0a52-0000-4000-8000-000000000001\"}}")!.AsObject();
+        var st = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = A(@"C:\chrome.exe") };
+        var files = new Dictionary<string, string>();
+        var prep = new VlessPrep([ip1, ip2, ip3], [O("s0", ip1), O("s1", ip2), O("s2", ip3)], "s1", files, new Dictionary<string, string> { ["s0"] = "A|-", ["s1"] = "B|-", ["s2"] = "C|-" });
+        var c = JsonNode.Parse(ConfigBuilder.BuildVless(st, 9090, "t", prep, RD))!.AsObject();
+        var sel = Obj(Arr(c["outbounds"])[0]);
+        Check(Str(sel["type"]) == "selector" && Str(sel["tag"]) == "proxy" && Arr(sel["outbounds"]).Select(Str).SequenceEqual(["s0", "s1", "s2"]) && Str(sel["default"]) == "s1" && sel["interrupt_exist_connections"]!.GetValue<bool>(), "подписка: selector proxy с выбранным по умолчанию");
+        var cidrs = Arr(Obj(Arr(Obj(c["route"])["rules"])[2])["ip_cidr"]).Select(Str).ToList();
+        Check(Arr(c["outbounds"]).Count == 5 && cidrs.SequenceEqual(["203.0.113.1/32", "203.0.113.2/32", "2001:db8::3/128"]), "подписка: 3 сервера + direct, все IP мимо туннеля");
+        Check(Str(Obj(Arr(c["outbounds"])[4])["tag"]) == "direct", "подписка: direct последним");
+        Check(Str(prep.FetchProxy["tag"]) == "proxy" && Str(prep.FetchProxy["server"]) == ip2.ToString(), "FetchProxy — выбранный с тегом proxy");
+        Check(Str(prep.Outbounds[1]["tag"]) == "s1", "FetchProxy не портит исходный outbound");
+        var one = Single(O("proxy", ip1), ip1);
+        Check(one.FetchProxy == one.Outbounds[0], "FetchProxy одиночной — сам outbound");
+
+        var pr = JsonNode.Parse(ConfigBuilder.BuildProbe(prep.Outbounds, 9091, "sec"))!.AsObject();
+        Check(!pr.ContainsKey("inbounds") && Str(Obj(Obj(pr["experimental"])["clash_api"])["external_controller"]) == "127.0.0.1:9091"
+            && Str(Obj(Obj(pr["experimental"])["clash_api"])["secret"]) == "sec" && Str(Obj(pr["log"])["level"]) == "warn"
+            && Arr(pr["outbounds"]).Select(o => Str(Obj(o)["tag"])).SequenceEqual(["s0", "s1", "s2", "direct"])
+            && Obj(pr["route"])["auto_detect_interface"]!.GetValue<bool>(), "BuildProbe: без inbounds, clash_api и все outbound'ы");
+    }
+
     static void VlessConfigTests()
     {
         // Эталон SOCKS5 (2.3): правила в rule-set'ах, в конфиге только ссылки на них
@@ -288,7 +351,7 @@ static class Program
         JsonObject V(Server link, string[] lists, params string[] apps)
         {
             var st = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = A(apps), Lists = lists.ToList() };
-            return JsonNode.Parse(ConfigBuilder.BuildVless(st, 9090, "t", ConfigBuilder.ProxyOutbound(link, srv), srv, RD))!.AsObject();
+            return JsonNode.Parse(ConfigBuilder.BuildVless(st, 9090, "t", Single(ConfigBuilder.ProxyOutbound(link, srv), srv), RD))!.AsObject();
         }
 
         var c = V(reality, files, @"C:\a\chrome.exe");
@@ -342,7 +405,7 @@ static class Program
         Check(Str(Obj(c["dns"])["strategy"]) == "ipv4_only", "VLESS DNS: только IPv4 (у сервера может не быть IPv6)");
 
         // снимки, отличающиеся программами, сайтами и списками, дают тот же конфиг: за них отвечают файлы правил
-        string Cj(Settings st) => ConfigBuilder.BuildVless(st, 9090, "t", ConfigBuilder.ProxyOutbound(reality, srv), srv, RD);
+        string Cj(Settings st) => ConfigBuilder.BuildVless(st, 9090, "t", Single(ConfigBuilder.ProxyOutbound(reality, srv), srv), RD);
         var s1 = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "youtube" }, Sites = new List<string> { "example.com" } };
         var s2 = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = A(@"C:\a\other.exe", @"C:\b\x.exe"), Lists = new List<string> { "telegram" }, Sites = new List<string> { "1.2.3.4" } };
         Check(Cj(s1) == Cj(s2), "BuildVless: программы, сайты и списки не влияют на конфиг");
@@ -631,10 +694,36 @@ static class Program
                 var st = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "russia_inside" }, Sites = new List<string> { "example.com", "10.0.0.0/8" } };
                 var cfg = Path.Combine(tmp, name + ".json");
                 RuleFiles.Write(rd, st, f);
-                File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", proxy, srv, rd));
+                File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", Single(proxy, srv), rd));
                 Check(Run("check", "-c", cfg) == 0, "sing-box check: " + name);
                 File.WriteAllText(cfg, ConfigBuilder.BuildFetch(proxy, 18080));
                 Check(Run("check", "-c", cfg) == 0, "sing-box check: fetch " + name);
+            }
+            // подписка: три настоящих outbound'а под selector и конфиг пинга
+            var subs = new List<JsonObject>();
+            foreach (var (n, link) in new[]
+            {
+                ("s0", $"vless://{U}@nl.example.com:443?security=reality&sni=www.microsoft.com&pbk={Pbk}&sid=ab12&type=tcp&flow=xtls-rprx-vision"),
+                ("s1", $"vless://{U}@nl.example.com:8920?security=reality&sni=www.microsoft.com&pbk={Pbk}&sid=ab12&type=grpc&serviceName=svc&fp=randomized"),
+                ("s2", "hysteria2://pass@hy.example.com:443?sni=hy.example.com&obfs=salamander&obfs-password=o"),
+            })
+            {
+                var server = Links.Decode(link, run, out var derr);
+                if (server == null) { Check(false, "sing-box check: подписка " + n + " — разбор: " + derr); continue; }
+                var o = ConfigBuilder.ProxyOutbound(server, srv);
+                o["tag"] = n;
+                subs.Add(o);
+            }
+            if (subs.Count == 3)
+            {
+                var sst = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "russia_inside" } };
+                var sprep = new VlessPrep([srv, srv, srv], subs, "s1", f, new Dictionary<string, string>());
+                var scfg = Path.Combine(tmp, "sub.json");
+                RuleFiles.Write(rd, sst, f);
+                File.WriteAllText(scfg, ConfigBuilder.BuildVless(sst, 9090, "t", sprep, rd));
+                Check(Run("check", "-c", scfg) == 0, "sing-box check: подписка с selector");
+                File.WriteAllText(scfg, ConfigBuilder.BuildProbe(subs, 9091, "t"));
+                Check(Run("check", "-c", scfg) == 0, "sing-box check: конфиг пинга");
             }
             var both = Both();
             var sc = Path.Combine(tmp, "socks.json");
@@ -1585,15 +1674,15 @@ static class Program
 
         var srv = IPAddress.Parse("203.0.113.5");
         var vs = new Settings { Mode = ProxyMode.Vless, VlessLink = Reality, Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "youtube", "telegram" } };
-        v = Session.EvaluateVless(vs, srv, new JsonObject(), NoFiles("telegram", "youtube"));
-        Check(v.Error == null && v.Live == new Exits(true, false) && v.UdpOk == null && v.Vless != null && v.Vless.Server.Equals(srv) && v.Vless.ListFiles.Count == 0
+        v = Session.EvaluateVless(vs, Single(new JsonObject(), srv), NoFiles("telegram", "youtube"));
+        Check(v.Error == null && v.Live == new Exits(true, false) && v.UdpOk == null && v.Vless != null && v.Vless.Ips[0].Equals(srv) && v.Vless.ListFiles.Count == 0
             && v.Warnings.SequenceEqual(new[] { "Список Telegram не загрузился", "Список YouTube не загрузился" }),
             "EvaluateVless: два Failed -> два предупреждения в порядке Failed");
         vs.Apps.Clear();
-        v = Session.EvaluateVless(vs, srv, new JsonObject(), NoFiles("telegram", "youtube"));
+        v = Session.EvaluateVless(vs, Single(new JsonObject(), srv), NoFiles("telegram", "youtube"));
         Check(v.Error == "Списки не загрузились" && v.Vless == null && v.Warnings.Count == 0, "EvaluateVless: нет программ и ни одного файла -> ошибка");
         var one = new Dictionary<string, string> { ["youtube"] = @"C:\l\youtube.srs" };
-        v = Session.EvaluateVless(vs, srv, new JsonObject(), new ListsResult(one, new[] { "telegram" }, Array.Empty<string>()));
+        v = Session.EvaluateVless(vs, Single(new JsonObject(), srv), new ListsResult(one, new[] { "telegram" }, Array.Empty<string>()));
         Check(v.Error == null && v.Vless!.ListFiles.ContainsKey("youtube") && v.Warnings.SequenceEqual(new[] { "Список Telegram не загрузился" }),
             "EvaluateVless: без программ хватает одного загруженного списка");
     }

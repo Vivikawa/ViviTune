@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net.Http.Headers;
 using System.Text.Json;
 
 namespace ViviTune;
@@ -59,19 +58,8 @@ public static class VlessProbe
 
     public static string? AfterStart(int apiPort, string secret, CancellationToken ct, Action<string>? log = null)
     {
-        // без системного прокси: запросы к 127.0.0.1 не должны уходить в прокси из настроек Windows
-        using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(12) };
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", secret);
-        (int, string)? Get(string path, CancellationToken c)
-        {
-            try
-            {
-                using var resp = http.GetAsync("http://127.0.0.1:" + apiPort + path, c).GetAwaiter().GetResult();
-                return ((int)resp.StatusCode, resp.Content.ReadAsStringAsync(c).GetAwaiter().GetResult());
-            }
-            catch { return null; }
-        }
-        return AfterStart(Get, ct, TimeSpan.FromSeconds(5), null, log);
+        using var api = new ClashApi(apiPort, secret);
+        return AfterStart(api.Get, ct, TimeSpan.FromSeconds(5), null, log);
     }
 
     // Status == 0 и непустой Answer

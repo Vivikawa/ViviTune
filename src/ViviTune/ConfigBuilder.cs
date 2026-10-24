@@ -101,12 +101,19 @@ namespace ViviTune
             return new object[] { tun };
         }
 
-        // proxy — ProxyOutbound, server — его IP; файлы правил (apps, sites, list-*) пишет RuleFiles.Write.
-        public static string BuildVless(Settings s, int apiPort, string apiSecret, JsonObject proxy, IPAddress server, string rulesDir)
+        // p.Outbounds — ProxyOutbound'ы, server — их IP; файлы правил (apps, sites, list-*) пишет RuleFiles.Write.
+        // Одиночная ссылка — outbound proxy; подписка — selector proxy над s0…sN, все IP серверов мимо туннеля.
+        public static string BuildVless(Settings s, int apiPort, string apiSecret, VlessPrep p, string rulesDir)
         {
             var err = s.Validate();
             if (err != null) throw new InvalidOperationException(err);
-            var cidr = server + (server.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32");
+            var cidrs = p.Ips.Select(ip => (object)(ip + (ip.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32"))).ToArray();
+            var outbounds = new List<object>();
+            if (p.Selected != null)
+                outbounds.Add(D("type", "selector", "tag", "proxy", "outbounds", p.Outbounds.Select(o => (object)(string)o["tag"]!).ToArray(),
+                    "default", p.Selected, "interrupt_exist_connections", true));
+            outbounds.AddRange(p.Outbounds);
+            outbounds.Add(D("type", "direct", "tag", "direct"));
 
             // один набор на всё: каждый список каталога всегда в конфиге (выключенный — пустой файл)
             var sets = new List<object> { LocalSet(rulesDir, RuleFiles.Apps), LocalSet(rulesDir, RuleFiles.Sites) };
@@ -116,7 +123,7 @@ namespace ViviTune
             {
                 D("action", "sniff"),
                 D("protocol", "dns", "action", "hijack-dns"),
-                D("ip_cidr", new object[] { cidr }, "outbound", "direct"),
+                D("ip_cidr", cidrs, "outbound", "direct"),
                 D("rule_set", tags, "outbound", "proxy")
             };
 
@@ -126,8 +133,17 @@ namespace ViviTune
             var config = Head(apiPort, apiSecret, s.SingBoxLog);
             config["dns"] = D("servers", new object[] { D("type", "tcp", "tag", "dns", "server", "1.1.1.1", "detour", "proxy") }, "final", "dns", "strategy", "ipv4_only");
             config["inbounds"] = Tun(true);
-            config["outbounds"] = new object[] { proxy, D("type", "direct", "tag", "direct") };
+            config["outbounds"] = outbounds.ToArray();
             config["route"] = D("rules", rules.ToArray(), "rule_set", sets.ToArray(), "final", "direct", "auto_detect_interface", true, "find_process", true, "default_domain_resolver", "dns");
+            return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
+        }
+
+        // Временный sing-box без TUN для пинга серверов подписки через Clash API: только outbound'ы, трафик системы не трогает.
+        public static string BuildProbe(IReadOnlyList<JsonObject> outbounds, int apiPort, string apiSecret)
+        {
+            var config = Head(apiPort, apiSecret, "warn");
+            config["outbounds"] = outbounds.Select(o => (object)o.DeepClone()).Append(D("type", "direct", "tag", "direct")).ToArray();
+            config["route"] = D("final", "direct", "auto_detect_interface", true);
             return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
         }
 
