@@ -26,6 +26,7 @@ static class Program
         TrafficTests();
         EvaluateTests();
         SessionTests();
+        IPv6Tests();
         CatalogTests();
         ViewStateTests();
         AppListTests();
@@ -567,6 +568,37 @@ static class Program
         finally { try { Directory.Delete(root, true); } catch { } }
     }
 
+    static void IPv6Tests()
+    {
+        string[] Addr(string json) => Arr(Obj(Arr(JsonNode.Parse(json)!["inbounds"])[0])["address"]).Select(Str).ToArray()!;
+        string[] both = ["172.19.0.1/30", "fdfe:dcba:9876::1/126"], v4 = ["172.19.0.1/30"];
+        var srv = IPAddress.Parse("203.0.113.1");
+        var vp = Single(JsonNode.Parse("{\"type\":\"vless\",\"tag\":\"proxy\",\"server\":\"203.0.113.1\",\"server_port\":443,\"uuid\":\"3f1c0a52-0000-4000-8000-000000000001\"}")!.AsObject(), srv);
+        Check(Addr(ConfigBuilder.Build(Two(), 9090, "t", RD)).SequenceEqual(both), "TUN: SOCKS5 по умолчанию — IPv4 и IPv6");
+        Check(Addr(ConfigBuilder.Build(Two(), 9090, "t", RD, null, ipv6: false)).SequenceEqual(v4), "TUN: SOCKS5 без IPv6 — только IPv4");
+        Check(Addr(ConfigBuilder.BuildVless(Vless1(), 9090, "t", vp, RD)).SequenceEqual(both), "TUN: VLESS по умолчанию — IPv4 и IPv6");
+        Check(Addr(ConfigBuilder.BuildVless(Vless1(), 9090, "t", vp, RD, ipv6: false)).SequenceEqual(v4), "TUN: VLESS без IPv6 — только IPv4");
+        bool ok = true; try { Net.HasIPv6(); } catch { ok = false; }
+        Check(ok, "Net.HasIPv6 не бросает");
+        var root = Path.Combine(Path.GetTempPath(), "vivitune-tests-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            foreach (var has in new[] { false, true })
+            {
+                var d = Path.Combine(root, has ? "a" : "b"); Directory.CreateDirectory(d); var cfg = Path.Combine(d, "config.json");
+                var fb = new FakeSingBox(); var log = new List<string>();
+                using var ss = new Session(Two(), fb, cfg, Up, Delay, hasIPv6: () => has);
+                ss.Log += l => { lock (log) log.Add(l); };
+                ss.ConnectAsync().Wait(2000);
+                bool line; lock (log) line = log.Contains("IPv6 в системе выключен — туннель только IPv4");
+                Check(ss.State == ConnState.Connected && Addr(File.ReadAllText(cfg)).SequenceEqual(has ? both : v4) && line == !has,
+                    "Session: hasIPv6=" + has + " — " + (has ? "оба адреса, без строки в логе" : "только IPv4 и строка в логе"));
+                ss.Disconnect();
+            }
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
     static bool Until(Func<bool> f, int ms = 3000)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -1044,6 +1076,11 @@ static class Program
                 RuleFiles.Write(rd, st, f);
                 File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", Single(proxy, srv), rd));
                 Check(Run("check", "-c", cfg) == 0, "sing-box check: " + name);
+                if (name == "reality")
+                {
+                    File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", Single(proxy, srv), rd, ipv6: false));
+                    Check(Run("check", "-c", cfg) == 0, "sing-box check: " + name + " без IPv6");
+                }
                 File.WriteAllText(cfg, ConfigBuilder.BuildFetch(proxy, 18080));
                 Check(Run("check", "-c", cfg) == 0, "sing-box check: fetch " + name);
             }

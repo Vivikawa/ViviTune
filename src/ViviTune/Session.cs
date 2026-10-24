@@ -119,6 +119,7 @@ public sealed class Session : IDisposable
     string? currentServer;                    // подписка: ключ сервера, на котором работает sing-box
     IClashApi? api;                           // подписка: клиент Clash API запущенного sing-box
     ServerWatch? watch;                       // подписка: проверка текущего сервера
+    readonly Func<bool> hasIPv6;              // есть ли IPv6 в системе; решаем один раз на запуск sing-box
     readonly SemaphoreSlim pingGate = new(1, 1);
     IReadOnlyDictionary<string, int?> pings = new Dictionary<string, int?>(); // ключ -> последний пинг; заменяется целиком
 
@@ -141,8 +142,9 @@ public sealed class Session : IDisposable
     public Exits Live { get { lock (gate) return live; } }
     public DateTime? ConnectedSince { get { lock (gate) return since; } }
 
-    public Session(Settings settings, ISingBox singBox, string configPath, Func<string, int, ProbeResult> probe, TimeSpan restartDelay, VlessDeps? vless = null)
+    public Session(Settings settings, ISingBox singBox, string configPath, Func<string, int, ProbeResult> probe, TimeSpan restartDelay, VlessDeps? vless = null, Func<bool>? hasIPv6 = null)
     {
+        this.hasIPv6 = hasIPv6 ?? ViviTune.Windows.Net.HasIPv6;
         this.settings = settings;
         sb = singBox;
         this.configPath = configPath;
@@ -669,9 +671,11 @@ public sealed class Session : IDisposable
         int port = FreePort();
         var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
         RuleFiles.Write(rulesDir, snap, v.Vless?.ListFiles ?? new Dictionary<string, string>());
+        bool ipv6 = hasIPv6();
+        if (!ipv6) Log?.Invoke("IPv6 в системе выключен — туннель только IPv4");
         File.WriteAllText(configPath, v.Vless is { } p
-            ? ConfigBuilder.BuildVless(snap, port, secret, p, rulesDir)
-            : ConfigBuilder.Build(snap, port, secret, rulesDir, v.Live));
+            ? ConfigBuilder.BuildVless(snap, port, secret, p, rulesDir, ipv6)
+            : ConfigBuilder.Build(snap, port, secret, rulesDir, v.Live, ipv6));
         sb.Start(configPath);
         IClashApi? clash = null;
         try

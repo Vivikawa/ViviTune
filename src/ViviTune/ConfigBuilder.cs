@@ -27,7 +27,7 @@ namespace ViviTune
         static object LocalSet(string rulesDir, string tag, string format = "source") =>
             D("type", "local", "tag", tag, "format", format, "path", RuleFiles.PathOf(rulesDir, tag));
 
-        public static string Build(Settings s, int apiPort, string apiSecret, string rulesDir, Exits? live = null)
+        public static string Build(Settings s, int apiPort, string apiSecret, string rulesDir, Exits? live = null, bool ipv6 = true)
         {
             var err = s.Validate();
             if (err != null) throw new InvalidOperationException(err);
@@ -75,7 +75,7 @@ namespace ViviTune
                     D("type", "tcp", "tag", "proxy-dns", "server", "1.1.1.1", "detour", "proxy")
                 },
                 "rules", proxyRule ? new object[] { D("rule_set", new[] { RuleFiles.Apps }, "server", "proxy-dns") } : Array.Empty<object>());
-            config["inbounds"] = Tun(false);
+            config["inbounds"] = Tun(false, ipv6);
             config["outbounds"] = outbounds.ToArray();
             config["route"] = D(
                 "rules", rules.ToArray(),
@@ -94,16 +94,17 @@ namespace ViviTune
             "experimental", D("clash_api", D("external_controller", "127.0.0.1:" + apiPort, "secret", apiSecret)));
 
         // VLESS: mtu 9000, как у Hiddify (без него sing-box 1.12 на Windows берёт 65535); SOCKS5 не трогаем.
-        static object[] Tun(bool vless)
+        // ipv6=false: в Windows IPv6 выключен — sing-tun упал бы на «set ipv6 address: Element not found».
+        static object[] Tun(bool vless, bool ipv6)
         {
-            var tun = D("type", "tun", "tag", "tun-in", "address", new object[] { "172.19.0.1/30", "fdfe:dcba:9876::1/126" }, "auto_route", true, "strict_route", vless);
+            var tun = D("type", "tun", "tag", "tun-in", "address", ipv6 ? new object[] { "172.19.0.1/30", "fdfe:dcba:9876::1/126" } : new object[] { "172.19.0.1/30" }, "auto_route", true, "strict_route", vless);
             if (vless) tun["mtu"] = 9000;
             return new object[] { tun };
         }
 
         // p.Outbounds — ProxyOutbound'ы, server — их IP; файлы правил (apps, sites, list-*) пишет RuleFiles.Write.
         // Одиночная ссылка — outbound proxy; подписка — selector proxy над s0…sN, все IP серверов мимо туннеля.
-        public static string BuildVless(Settings s, int apiPort, string apiSecret, VlessPrep p, string rulesDir)
+        public static string BuildVless(Settings s, int apiPort, string apiSecret, VlessPrep p, string rulesDir, bool ipv6 = true)
         {
             var err = s.Validate();
             if (err != null) throw new InvalidOperationException(err);
@@ -132,7 +133,7 @@ namespace ViviTune
             // ponytail: IPv6-литералы без DNS всё ещё уходят в IPv6; опция «есть IPv6», если найдётся сервер с ним
             var config = Head(apiPort, apiSecret, s.SingBoxLog);
             config["dns"] = D("servers", new object[] { D("type", "tcp", "tag", "dns", "server", "1.1.1.1", "detour", "proxy") }, "final", "dns", "strategy", "ipv4_only");
-            config["inbounds"] = Tun(true);
+            config["inbounds"] = Tun(true, ipv6);
             config["outbounds"] = outbounds.ToArray();
             config["route"] = D("rules", rules.ToArray(), "rule_set", sets.ToArray(), "final", "direct", "auto_detect_interface", true, "find_process", true, "default_domain_resolver", "dns");
             return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
