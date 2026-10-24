@@ -59,15 +59,26 @@ namespace ViviTune.Ui
                 IconPng = ProcessCatalog.IconPng
             };
 
-            // Сводку по ссылке даёт движок (~70 мс): не в UI-потоке
+            // Сводку по ссылке даёт движок (~70 мс): не в UI-потоке. Поле шлёт ссылку на каждый символ —
+            // разбираем только последнюю, через 300 мс тишины
+            CancellationTokenSource? decodeCts = null;
             void SetVless(string link)
             {
                 state.SetVless(link);
+                decodeCts?.Cancel();
                 if (string.IsNullOrWhiteSpace(link)) return;
-                Task.Run(() =>
+                var cts = decodeCts = new CancellationTokenSource();
+                Task.Run(async () =>
                 {
-                    var srv = Links.Decode(link, engine, out var e);
-                    Dispatcher.UIThread.Post(() => state.SetVlessDecoded(link, srv, e));
+                    Server? srv = null; string? e;
+                    try
+                    {
+                        await Task.Delay(300, cts.Token);
+                        srv = Links.Decode(link, engine, out e);
+                    }
+                    catch (OperationCanceledException) { return; }
+                    catch (Exception) { e = "Не удалось разобрать ссылку"; } // текст исключения не показываем: ссылка секретна
+                    if (!cts.IsCancellationRequested) Dispatcher.UIThread.Post(() => state.SetVlessDecoded(link, srv, e));
                 });
             }
             SetVless(settings.VlessLink);
