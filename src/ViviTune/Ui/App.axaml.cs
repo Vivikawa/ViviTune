@@ -17,12 +17,15 @@ namespace ViviTune.Ui
         {
             // Session и sing-box только при настоящем запуске: Shots (headless, без lifetime) рисует окно без них.
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-                desktop.MainWindow = CreateMainWindow();
+                Start(desktop);
             base.OnFrameworkInitializationCompleted();
         }
 
-        static MainWindow CreateMainWindow()
+        static void Start(IClassicDesktopStyleApplicationLifetime desktop)
         {
+            // При автозапуске окно не показывается (только трей), поэтому выход только явный: «Выход» и выключение Windows
+            desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            bool autostart = desktop.Args?.Contains(Autostart.Flag) == true;
             var dir = AppContext.BaseDirectory;
             var settingsPath = Path.Combine(dir, "settings.json");
             var settings = Settings.Load(settingsPath);
@@ -163,8 +166,10 @@ namespace ViviTune.Ui
             session.Log += line => Dispatcher.UIThread.Post(() => state.AddLog(line));
             session.Speed += s => Dispatcher.UIThread.Post(() => state.PushSpeed(s));
 
+            CancellationTokenSource? auto = null; // попытки подключения при автозапуске
             state.ToggleRequested += async () =>
             {
+                auto?.Cancel(); // пользователь решил сам: попытки автозапуска больше не нужны
                 try
                 {
                     if (session.State == ConnState.Disconnected) await session.ConnectAsync();
@@ -199,10 +204,38 @@ namespace ViviTune.Ui
                 Save();
             };
 
+            // Переключатель автозапуска показывает, есть ли задача; schtasks — не в UI-потоке.
+            // Запуск ярлыком при включённом автозапуске обновляет в задаче путь (папку могли перенести).
+            var exe = Environment.ProcessPath ?? Path.Combine(dir, "ViviTune.exe");
+            Task.Run(() =>
+            {
+                try
+                {
+                    bool on = Autostart.IsEnabled();
+                    if (on && !autostart) Autostart.Enable(exe);
+                    Dispatcher.UIThread.Post(() => state.Autostart = on);
+                }
+                catch (Exception e) { Dispatcher.UIThread.Post(() => state.AddLog("Автозапуск: " + e.Message)); }
+            });
+            state.SetAutostartRequested += on => Task.Run(() =>
+            {
+                string? err = null;
+                try { if (on) Autostart.Enable(exe); else Autostart.Disable(); }
+                catch (Exception e) { err = e.Message; }
+                bool now;
+                try { now = Autostart.IsEnabled(); }
+                catch { now = !on; }
+                Dispatcher.UIThread.Post(() =>
+                {
+                    state.Autostart = now; // не вышло — переключатель возвращается
+                    if (err != null) state.AddLog((on ? "Не удалось включить автозапуск: " : "Не удалось выключить автозапуск: ") + err);
+                });
+            });
+
             var window = new MainWindow(state);
 
             // Крестик и Alt+F4 прячут окно в трей, подключение остаётся. По-настоящему закрывают «Выход»
-            // (Close из кода — IsProgrammatic) и выключение Windows (другая CloseReason).
+            // (Shutdown) и выключение Windows (другая CloseReason).
             window.Closing += (_, e) =>
             {
                 if (e.CloseReason != WindowCloseReason.WindowClosing || e.IsProgrammatic) return;
@@ -218,7 +251,7 @@ namespace ViviTune.Ui
             var openItem = new NativeMenuItem("Открыть");
             openItem.Click += (_, _) => ShowWindow();
             var quitItem = new NativeMenuItem("Выход");
-            quitItem.Click += (_, _) => window.Close();
+            quitItem.Click += (_, _) => desktop.Shutdown();
             tray.Icon = window.Icon;
             tray.Menu = new NativeMenu { openItem, toggleItem, new NativeMenuItemSeparator(), quitItem };
             tray.Clicked += (_, _) => ShowWindow();
@@ -226,13 +259,32 @@ namespace ViviTune.Ui
             var showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, ShowSignal);
             ThreadPool.RegisterWaitForSingleObject(showSignal, (_, _) => Dispatcher.UIThread.Post(ShowWindow), null, -1, false);
 
-            window.Closed += (_, _) =>
+            desktop.Exit += (_, _) =>
             {
                 detailTimer.Stop();
                 session.Dispose(); // останавливает sing-box
                 runner.Dispose();  // Session его не освобождает
             };
-            return window;
+
+            if (!autostart)
+            {
+                desktop.MainWindow = window; // lifetime покажет его при старте
+                return;
+            }
+            // Автозапуск: только трей и подключение. Не вышло за 3 попытки (неверные настройки — сразу) — окно с ошибкой.
+            auto = new CancellationTokenSource();
+            var ct = auto.Token;
+            bool valid = settings.Clone().Validate() == null;
+            Dispatcher.UIThread.Post(async () =>
+            {
+                bool ok = await Autostart.Connect(async () =>
+                {
+                    try { await session.ConnectAsync(); }
+                    catch (Exception e) { state.AddLog("Ошибка: " + e.Message); }
+                    return session.State != ConnState.Disconnected;
+                }, valid ? 3 : 1, TimeSpan.FromSeconds(10), n => state.AddLog($"Автозапуск: попытка {n} из 3"), ct);
+                if (!ok) ShowWindow();
+            });
         }
     }
 }

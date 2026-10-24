@@ -39,6 +39,11 @@ namespace ViviTune.Ui
             DirectPortBox.Text = s.DirectPort?.ToString(CultureInfo.InvariantCulture) ?? "";
         }
 
+        void OnAutostart(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            if (sender is Avalonia.Controls.Primitives.ToggleButton t) (DataContext as ViewState)?.RequestSetAutostart(t.IsChecked == true);
+        }
+
         void PushVless()
         {
             if (DataContext is not ViewState s) return;

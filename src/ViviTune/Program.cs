@@ -12,6 +12,7 @@ namespace ViviTune
             using var m = new Mutex(true, "ViviTune.SingleInstance", out bool created);
             if (!created)
             {
+                if (args.Contains(Windows.Autostart.Flag)) return 0; // автозапуск при уже открытом: окно не нужно
                 Windows.Native.AllowAnyForeground();
                 show.Set(); // уже запущен (может быть, в трее): пусть покажет окно
                 return 0;

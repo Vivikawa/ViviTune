@@ -57,6 +57,18 @@
                    Text="Изменить настройки можно после отключения." />
         <TextBlock Classes="muted" TextWrapping="Wrap" IsVisible="{Binding SettingsEditable}"
                    Text="Сохраняется автоматически." />
+        <TextBlock Text="Запуск" FontWeight="SemiBold" Margin="0,8,0,0" />
+        <Border Classes="card">
+          <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,6,Auto">
+            <TextBlock Text="Запускать вместе с Windows" VerticalAlignment="Center" />
+            <!-- OneWay: Autostart меняет только App (по RequestSetAutostart); можно и при подключении -->
+            <ToggleButton Grid.Column="1" Theme="{StaticResource Switch}" VerticalAlignment="Center"
+                          IsChecked="{Binding Autostart, Mode=OneWay}" Click="OnAutostart"
+                          AutomationProperties.Name="Запускать вместе с Windows" />
+            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Classes="muted" TextWrapping="Wrap"
+                       Text="ViviTune откроется в трее и сам подключится. Если за три попытки не выйдет, покажет окно с ошибкой." />
+          </Grid>
+        </Border>
       </StackPanel>
     </ScrollViewer>
     <TextBlock Name="VersionText" Grid.Row="2" Classes="muted" FontSize="11" />

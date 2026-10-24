@@ -53,6 +53,17 @@ public sealed class ViewState : Observable
     public event Action<string>? SetVlessRequested; // ссылка
     public event Action<string, bool>? SetListEnabledRequested; // id списка
     public event Action<string>? AddSiteRequested, RemoveSiteRequested; // нормализованная запись
+    public event Action<bool>? SetAutostartRequested;
+
+    // Есть ли задача автозапуска (ставит App). Уведомляет и без изменения: переключатель, который пользователь
+    // щёлкнул, а задача не создалась или не удалилась, возвращается к настоящему значению.
+    public bool Autostart { get => autostart; set { autostart = value; Notify(nameof(Autostart)); } }
+    bool autostart;
+    // Без изменений события нет: переключатель повторяет значение, которое ему поставил App
+    public void RequestSetAutostart(bool on)
+    {
+        if (on != autostart) SetAutostartRequested?.Invoke(on);
+    }
 
     public ViewState()
     {

@@ -36,6 +36,7 @@ static class Program
         ListStoreTests();
         VlessProbeTests();
         ViewStateVlessTests();
+        AutostartTests();
         return failures == 0 ? 0 : 1;
     }
 
@@ -637,6 +638,53 @@ static class Program
         cl.Apps.Clear();
         cl.DirectPort = 6;
         Check(orig.DirectApps[0].Enabled && orig.Apps.Count == 1 && orig.DirectPort == 5, "Clone: глубокая копия");
+    }
+
+    static void AutostartTests()
+    {
+        // Попытки подключения: attempt -> удалось ли; retrying(n) — перед попыткой n
+        (bool Result, int Calls, List<int> Retries) Run(Func<int, bool> ok, int attempts, TimeSpan pause, CancellationToken ct = default)
+        {
+            int calls = 0;
+            var retries = new List<int>();
+            bool r = Autostart.Connect(() => Task.FromResult(ok(++calls)), attempts, pause, retries.Add, ct).Result;
+            return (r, calls, retries);
+        }
+        var third = Run(n => n == 3, 3, TimeSpan.Zero);
+        Check(third.Result && third.Calls == 3 && third.Retries.SequenceEqual([2, 3]), "Автозапуск: третья попытка удалась -> без окна, лог перед 2-й и 3-й");
+        var never = Run(_ => false, 3, TimeSpan.Zero);
+        Check(!never.Result && never.Calls == 3, "Автозапуск: три неудачи -> окно, четвёртой попытки нет");
+        var once = Run(_ => false, 1, TimeSpan.Zero);
+        Check(!once.Result && once.Calls == 1 && once.Retries.Count == 0, "Автозапуск: одна попытка (настройки неверны) -> сразу окно");
+        using (var cts = new CancellationTokenSource(100))
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var cancelled = Run(_ => false, 3, TimeSpan.FromSeconds(30), cts.Token);
+            Check(cancelled.Result && cancelled.Calls == 1 && sw.Elapsed < TimeSpan.FromSeconds(5),
+                "Автозапуск: пользователь сам нажал кнопку в паузе -> попытки прекращаются, окно не нужно");
+        }
+
+        var exe = @"C:\Игры & VPN\ViviTune\ViviTune.exe";
+        var x = System.Xml.Linq.XDocument.Parse(Autostart.TaskXml(exe, @"PC\Петя"));
+        string? El(string name) => x.Descendants().FirstOrDefault(e => e.Name.LocalName == name)?.Value;
+        Check(El("Command") == exe && El("Arguments") == "--autostart", "Задача автозапуска: путь с & и кириллицей, флаг --autostart");
+        Check(x.Descendants().Any(e => e.Name.LocalName == "LogonTrigger") && El("UserId") == @"PC\Петя" && El("RunLevel") == "HighestAvailable",
+            "Задача автозапуска: при входе этого пользователя, с наивысшими правами");
+        Check(El("DisallowStartIfOnBatteries") == "false" && El("StopIfGoingOnBatteries") == "false" && El("ExecutionTimeLimit") == "PT0S",
+            "Задача автозапуска: работает от батареи и без ограничения 72 ч");
+        Check(El("Priority") == "4", "Задача автозапуска: обычный приоритет (иначе sing-box наследует пониженный)");
+
+        var v = new ViewState();
+        int ev = 0; bool? got = null;
+        v.SetAutostartRequested += on => { ev++; got = on; };
+        v.RequestSetAutostart(false);
+        Check(ev == 0, "ViewState: автозапуск без изменений — события нет");
+        v.RequestSetAutostart(true);
+        Check(ev == 1 && got == true, "ViewState: автозапуск включают — событие");
+        var names = new List<string?>();
+        v.PropertyChanged += (_, e) => names.Add(e.PropertyName);
+        v.Autostart = false;
+        Check(names.Contains(nameof(ViewState.Autostart)), "ViewState: Autostart уведомляет и без изменения (переключатель вернётся, если не вышло)");
     }
 
     static void ViewStateVlessTests()
