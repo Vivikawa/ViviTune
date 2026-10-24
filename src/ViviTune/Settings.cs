@@ -37,6 +37,10 @@ namespace ViviTune
 
         public List<string> Sites { get; set; } = new List<string>(); // свои сайты: нормализованные домены/IP/подсети
 
+        // Только для разработчика: уровень лога sing-box и запись в sing-box.log; null — выключено
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SingBoxLog { get; set; }
+
         // Читает и v1 (Apps: ["путь"]), и v2 (Apps: [{Path, Enabled}]); неизвестные элементы пропускает.
         public static Settings Load(string path)
         {
@@ -55,6 +59,7 @@ namespace ViviTune
                     else if (kv.Key.Equals("Mode", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue mv && mv.TryGetValue<string>(out var mode))
                         s.Mode = mode.Equals("vless", StringComparison.OrdinalIgnoreCase) ? ProxyMode.Vless : ProxyMode.Socks5;
                     else if (kv.Key.Equals("VlessLink", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue lv && lv.TryGetValue<string>(out var link)) s.VlessLink = link;
+                    else if (kv.Key.Equals("SingBoxLog", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue bv && bv.TryGetValue<string>(out var lvl) && lvl.ToLowerInvariant() is "trace" or "debug" or "info" or "warn" or "error") s.SingBoxLog = lvl.ToLowerInvariant();
                     else if (kv.Key.Equals("Lists", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonArray larr)
                     {
                         foreach (var item in larr)
@@ -128,7 +133,7 @@ namespace ViviTune
         // Глубокая копия: новые списки и новые AppEntry.
         public Settings Clone() => new Settings
         {
-            Ip = Ip, Port = Port, DirectPort = DirectPort,
+            Ip = Ip, Port = Port, DirectPort = DirectPort, SingBoxLog = SingBoxLog,
             Mode = Mode, VlessLink = VlessLink, Lists = Lists.ToList(), Sites = Sites.ToList(),
             Apps = Apps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList(),
             DirectApps = DirectApps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList()

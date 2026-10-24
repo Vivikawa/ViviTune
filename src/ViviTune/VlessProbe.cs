@@ -12,7 +12,7 @@ public static class VlessProbe
 
     // get(путь с запросом, отмена) -> (HTTP-код, тело) или null, если Clash API не ответил.
     // Не бросает исключений, на отмену сразу возвращает текст ошибки (Session его игнорирует).
-    public static string? AfterStart(Func<string, CancellationToken, (int Status, string Body)?> get, CancellationToken ct, TimeSpan readyTimeout, TimeSpan? retryPause = null)
+    public static string? AfterStart(Func<string, CancellationToken, (int Status, string Body)?> get, CancellationToken ct, TimeSpan readyTimeout, TimeSpan? retryPause = null, Action<string>? log = null)
     {
         var pause = retryPause ?? TimeSpan.FromSeconds(1.5);
         const string notStarted = "sing-box не запустился, подробности в логе";
@@ -28,13 +28,19 @@ public static class VlessProbe
             // две попытки: сразу после старта TUN sing-box может сбросить сеть и оборвать первое соединение
             for (var i = 0; ; i++)
             {
-                if (get("/proxies/proxy/delay?timeout=5000&url=" + Uri.EscapeDataString(DelayUrl), ct) is { Status: 200 }) break;
+                var t0 = Stopwatch.GetTimestamp();
+                var delay = get("/proxies/proxy/delay?timeout=5000&url=" + Uri.EscapeDataString(DelayUrl), ct);
+                if (delay is { Status: 200 }) break;
+                Fail(log, "Проверка сервера", i, delay, t0);
                 if (i == 1) return "Сервер не отвечает";
                 if (ct.WaitHandle.WaitOne(pause)) return notStarted;
             }
             for (var i = 0; ; i++)
             {
-                if (get("/dns/query?name=" + DnsProbeName + "&type=A", ct) is { Status: 200 } dns && DnsAnswered(dns.Body)) break;
+                var t0 = Stopwatch.GetTimestamp();
+                var dns = get("/dns/query?name=" + DnsProbeName + "&type=A", ct);
+                if (dns is { Status: 200 } && DnsAnswered(dns.Value.Body)) break;
+                Fail(log, "Проверка DNS", i, dns, t0);
                 if (i == 1) return "DNS через сервер не отвечает";
                 if (ct.WaitHandle.WaitOne(pause)) return notStarted;
             }
@@ -43,7 +49,15 @@ public static class VlessProbe
         catch { return notStarted; }
     }
 
-    public static string? AfterStart(int apiPort, string secret, CancellationToken ct)
+    // Строка в лог разработчика: что ответил Clash API на неудавшейся попытке и сколько она длилась.
+    static void Fail(Action<string>? log, string what, int attempt, (int Status, string Body)? resp, long t0)
+    {
+        if (log == null) return;
+        var body = resp?.Body ?? "";
+        log($"{what}, попытка {attempt + 1}: {(resp == null ? "нет ответа" : resp.Value.Status.ToString())} {(body.Length > 200 ? body[..200] : body)} ({Stopwatch.GetElapsedTime(t0).TotalMilliseconds:0} мс)");
+    }
+
+    public static string? AfterStart(int apiPort, string secret, CancellationToken ct, Action<string>? log = null)
     {
         // без системного прокси: запросы к 127.0.0.1 не должны уходить в прокси из настроек Windows
         using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(12) };
@@ -57,7 +71,7 @@ public static class VlessProbe
             }
             catch { return null; }
         }
-        return AfterStart(Get, ct, TimeSpan.FromSeconds(5));
+        return AfterStart(Get, ct, TimeSpan.FromSeconds(5), null, log);
     }
 
     // Status == 0 и непустой Answer

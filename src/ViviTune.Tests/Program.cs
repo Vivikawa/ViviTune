@@ -39,7 +39,79 @@ static class Program
         ViewStateVlessTests();
         AutostartTests();
         LinksTests();
+        DevLogTests();
         return failures == 0 ? 0 : 1;
+    }
+
+    static void DevLogTests()
+    {
+        // Settings.SingBoxLog
+        var dir = Path.Combine(Path.GetTempPath(), "vt-devlog-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string? Load(string json) { var f = Path.Combine(dir, "s.json"); File.WriteAllText(f, json); return Settings.Load(f).SingBoxLog; }
+            Check(Load("{\"SingBoxLog\":\"DEBUG\"}") == "debug", "SingBoxLog: DEBUG -> debug");
+            Check(Load("{\"SingBoxLog\":\"bogus\"}") == null, "SingBoxLog: мусор -> null");
+            Check(Load("{}") == null, "SingBoxLog: нет поля -> null");
+            var sf = Path.Combine(dir, "save.json");
+            new Settings().Save(sf);
+            Check(!File.ReadAllText(sf).Contains("SingBoxLog"), "SingBoxLog: Save по умолчанию не пишет поле");
+            Check(new Settings { SingBoxLog = "trace" }.Clone().SingBoxLog == "trace", "SingBoxLog: Clone копирует");
+
+            // конфиг
+            var rd = Path.Combine(dir, "rules");
+            var s5 = new Settings { Ip = "192.168.1.1", Port = 1818, Apps = new List<AppEntry> { new AppEntry { Path = @"C:\a\app.exe" } } };
+            string Lvl(string json) => JsonNode.Parse(json)!["log"]!["level"]!.GetValue<string>();
+            Check(Lvl(ConfigBuilder.Build(s5, 9090, "s", rd)) == "warn", "SingBoxLog: SOCKS5 по умолчанию warn");
+            s5.SingBoxLog = "debug";
+            Check(Lvl(ConfigBuilder.Build(s5, 9090, "s", rd)) == "debug", "SingBoxLog: SOCKS5 debug");
+            var srv = IPAddress.Parse("203.0.113.5");
+            var link = new Server("n", JsonNode.Parse("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"3f1c0a52-0000-4000-8000-000000000001\"}")!.AsObject(), []);
+            var sv = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = new List<AppEntry> { new AppEntry { Path = @"C:\a\app.exe" } } };
+            string Bv() => ConfigBuilder.BuildVless(sv, 9090, "t", ConfigBuilder.ProxyOutbound(link, srv), srv, rd);
+            Check(Lvl(Bv()) == "warn", "SingBoxLog: VLESS по умолчанию warn");
+            sv.SingBoxLog = "debug";
+            Check(Lvl(Bv()) == "debug", "SingBoxLog: VLESS debug");
+
+            // LogFile
+            var lf = Path.Combine(dir, "sing-box.log");
+            using (var log = new LogFile(lf))
+            {
+                log.Write("первая"); log.Write("second");
+                string txt;
+                using (var fs = new FileStream(lf, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var sr = new StreamReader(fs)) txt = sr.ReadToEnd();
+                var ls = txt.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(x => x.TrimEnd('\r')).ToArray();
+                bool Pref(string l, string rest) => l.EndsWith(" " + rest) && System.Text.RegularExpressions.Regex.IsMatch(l, @"^\d\d:\d\d:\d\d\.\d\d\d ");
+                Check(ls.Length == 2 && Pref(ls[0], "первая") && Pref(ls[1], "second"), "LogFile: две строки с префиксом времени, читается при открытом");
+            }
+            var rf = Path.Combine(dir, "r.log");
+            using (var log = new LogFile(rf, 200))
+            {
+                for (var i = 0; i < 20; i++) log.Write("строка номер " + i + " xxxxxxxxxx");
+            }
+            Check(File.Exists(Path.Combine(dir, "r.old.log")) && new FileInfo(rf).Length < 400 && new FileInfo(rf).Length > 0, "LogFile: ротация в .old.log, новый файл мал");
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+
+        Check(LogFile.IsVerbose("+0500 2026-10-24 19:37:55 INFO inbound/tun[tun-in]: started")
+            && LogFile.IsVerbose("+0500 2026-10-24 19:37:55 DEBUG x") && LogFile.IsVerbose("+0500 2026-10-24 19:37:55 TRACE x")
+            && LogFile.IsVerbose("INFO router: x") && LogFile.IsVerbose("DEBUG x"), "IsVerbose: INFO/DEBUG/TRACE -> true");
+        Check(!LogFile.IsVerbose("+0500 2026-10-24 19:37:55 WARN x") && !LogFile.IsVerbose("+0500 2026-10-24 19:37:55 ERROR x")
+            && !LogFile.IsVerbose("FATAL x") && !LogFile.IsVerbose("Сервер не отвечает") && !LogFile.IsVerbose(""), "IsVerbose: WARN/ERROR/FATAL и сообщения ViviTune -> false");
+
+        // VlessProbe: лог неудачных попыток
+        (int, string)? Ok(string path) =>
+            path.StartsWith("/version") ? (200, "{}") :
+            path.StartsWith("/proxies/proxy/delay") ? (200, "{\"delay\":50}") :
+            path.StartsWith("/dns/query") ? (200, "{\"Status\":0,\"Answer\":[{\"data\":\"1.1.1.1\"}]}") : null;
+        var lines = new List<string>();
+        var n = 0;
+        var r = VlessProbe.AfterStart((p, c) => p.StartsWith("/proxies") && ++n == 1 ? (504, "boom") : Ok(p), CancellationToken.None, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(20), lines.Add);
+        Check(r == null && lines.Count == 1 && lines[0].StartsWith("Проверка сервера, попытка 1:") && lines[0].Contains("504") && lines[0].Contains("boom"), "VlessProbe: один сбой delay -> одна строка лога");
+        n = 0;
+        Check(VlessProbe.AfterStart((p, c) => p.StartsWith("/proxies") && ++n == 1 ? (504, "") : Ok(p), CancellationToken.None, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(20)) == null, "VlessProbe: без log всё работает");
     }
 
     static void RuleFilesTests()

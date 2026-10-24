@@ -29,6 +29,9 @@ namespace ViviTune.Ui
             var dir = AppContext.BaseDirectory;
             var settingsPath = Path.Combine(dir, "settings.json");
             var settings = Settings.Load(settingsPath);
+            // подробный лог sing-box в файл — только если в settings.json есть SingBoxLog
+            LogFile? devLog = settings.SingBoxLog != null ? new LogFile(Path.Combine(dir, "sing-box.log")) : null;
+            devLog?.Write($"=== ViviTune {typeof(App).Assembly.GetName().Version?.ToString(3)} ===");
             var engine = Links.Engine(Path.Combine(dir, "sing-box.exe")); // decode-link: для Session и сводки в UI
             var runner = new Runner(Path.Combine(dir, "sing-box.exe"));
             var session = new Session(settings, runner, Path.Combine(dir, "config.json"), ProxyProbe.Probe, TimeSpan.FromSeconds(1), new VlessDeps
@@ -42,7 +45,7 @@ namespace ViviTune.Ui
                     using var fetch = new Runner(Path.Combine(dir, "sing-box.exe")); // Job Object: умрёт вместе с нами
                     return ListStore.PrepareVia(Path.Combine(dir, "lists"), ids, fetch, proxy, DateTime.UtcNow);
                 },
-                AfterStart = (p, s, ct) => VlessProbe.AfterStart(p, s, ct) ?? Flush()
+                AfterStart = (p, s, ct) => VlessProbe.AfterStart(p, s, ct, devLog == null ? null : devLog.Write) ?? Flush()
             });
             // Очистка кэша DNS — по возможности: экспорт недокументирован, его сбой не должен ронять запуск.
             static string? Flush() { try { Native.FlushDns(); } catch { } return null; }
@@ -187,7 +190,11 @@ namespace ViviTune.Ui
 
             // События Session приходят из любых потоков (Speed — под её блокировкой): только Post, никогда Invoke.
             session.Changed += () => Dispatcher.UIThread.Post(Sync);
-            session.Log += line => Dispatcher.UIThread.Post(() => state.AddLog(line));
+            session.Log += line =>
+            {
+                devLog?.Write(line);
+                if (devLog == null || !LogFile.IsVerbose(line)) Dispatcher.UIThread.Post(() => state.AddLog(line));
+            };
             session.Speed += s => Dispatcher.UIThread.Post(() => state.PushSpeed(s));
 
             CancellationTokenSource? auto = null; // попытки подключения при автозапуске
@@ -288,6 +295,7 @@ namespace ViviTune.Ui
                 detailTimer.Stop();
                 session.Dispose(); // останавливает sing-box
                 runner.Dispose();  // Session его не освобождает
+                devLog?.Dispose();
             };
 
             if (!autostart)

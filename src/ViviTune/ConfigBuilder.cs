@@ -67,7 +67,7 @@ namespace ViviTune
                 sets.Add(LocalSet(rulesDir, RuleFiles.Bypass));
             }
 
-            var config = Head(apiPort, apiSecret);
+            var config = Head(apiPort, apiSecret, s.SingBoxLog);
             config["dns"] = D(
                 "servers", new object[]
                 {
@@ -89,8 +89,8 @@ namespace ViviTune
         }
 
         // Общие куски конфига: лог, clash_api, TUN (strict_route и mtu только для VLESS).
-        static Dictionary<string, object> Head(int apiPort, string apiSecret) => D(
-            "log", D("level", "warn", "timestamp", true),
+        static Dictionary<string, object> Head(int apiPort, string apiSecret, string? level) => D(
+            "log", D("level", level ?? "warn", "timestamp", true),
             "experimental", D("clash_api", D("external_controller", "127.0.0.1:" + apiPort, "secret", apiSecret)));
 
         // VLESS: mtu 9000, как у Hiddify (без него sing-box 1.12 на Windows берёт 65535); SOCKS5 не трогаем.
@@ -123,7 +123,7 @@ namespace ViviTune
             // весь DNS компьютера — к 1.1.1.1 через туннель: провайдер его не видит и не подменяет.
             // Только IPv4: у многих VLESS-серверов нет IPv6, и соединение к AAAA-адресу молча глохнет (голос Discord).
             // ponytail: IPv6-литералы без DNS всё ещё уходят в IPv6; опция «есть IPv6», если найдётся сервер с ним
-            var config = Head(apiPort, apiSecret);
+            var config = Head(apiPort, apiSecret, s.SingBoxLog);
             config["dns"] = D("servers", new object[] { D("type", "tcp", "tag", "dns", "server", "1.1.1.1", "detour", "proxy") }, "final", "dns", "strategy", "ipv4_only");
             config["inbounds"] = Tun(true);
             config["outbounds"] = new object[] { proxy, D("type", "direct", "tag", "direct") };
