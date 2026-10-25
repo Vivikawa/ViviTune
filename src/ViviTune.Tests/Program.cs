@@ -468,7 +468,7 @@ static class Program
                 ss.ServerChanged += k => { lock (changed) changed.Add(k); };
                 ss.ConnectAsync().Wait(2000);
                 lock (changed)
-                    Check(api.Selected == ("proxy", "s2") && ss.CurrentServer == K2 && changed.Count == 1 && changed.Last() == K2 && fv.Reaches == 0 && ss.State == ConnState.Connected,
+                    Check(api.Picked("s2") && ss.CurrentServer == K2 && changed.Count == 1 && changed.Last() == K2 && fv.Reaches == 0 && ss.State == ConnState.Connected,
                         "автовыбор: самый быстрый, без TCP-проверки");
                 Check(api.MaxParallel == 1 && ss.Pings[K0] == 120 && ss.Pings[K1] == null && ss.Pings[K2] == 40 && fv.AfterStarts == 1, "автовыбор: пинги по очереди, Pings заполнены");
             }
@@ -514,7 +514,7 @@ static class Program
                 bool bad = ss.SelectServer("нет|-");
                 bool ok = ss.SelectServer(K0);
                 lock (changed)
-                    Check(!bad && ok && api.Selected == ("proxy", "s0") && ss.CurrentServer == K0 && changed.Last() == K0, "SelectServer при подключении - Clash API, без перезапуска");
+                    Check(!bad && ok && api.Picked("s0") && ss.CurrentServer == K0 && changed.Last() == K0, "SelectServer при подключении - Clash API, без перезапуска");
                 Check(fb.Starts == 1, "переключение не перезапускает sing-box");
                 int pc = 0; ss.PingsChanged += _ => Interlocked.Increment(ref pc);
                 api.Delays["s0"] = 50; api.Delays["s1"] = 70;
@@ -538,7 +538,7 @@ static class Program
                 lock (api.Calls) for (int i = 0; i < 3; i++) api.Proxy.Enqueue(null);
                 bool got = Until(() => { lock (sw) return sw.Count > 0; });
                 lock (sw) lock (changed)
-                    Check(got && sw[0] == (K2, K0, 77) && ss.CurrentServer == K0 && changed.Last() == K0 && api.Selected == ("proxy", "s0"),
+                    Check(got && sw[0] == (K2, K0, 77) && ss.CurrentServer == K0 && changed.Last() == K0 && api.Picked("s0"),
                         "watch в Session: переключение обновляет CurrentServer, ServerChanged и ServerSwitched");
                 Check(ss.Pings[K0] == 77 && pc > 0, "пинги watch попадают в Session.Pings и PingsChanged");
             }
@@ -569,7 +569,7 @@ static class Program
                 bool pinging = Until(() => { lock (api.Calls) return api.Calls.Contains("s0"); });
                 bool ok = ss.SelectServer(K0);
                 Thread.Sleep(500);
-                Check(pinging && ok && switches == 0 && api.Selected == ("proxy", "s0") && ss.CurrentServer == K0, "ручной выбор во время пингов watch не перебивается");
+                Check(pinging && ok && switches == 0 && api.Picked("s0") && ss.CurrentServer == K0, "ручной выбор во время пингов watch не перебивается");
             }
             {
                 // без галки: ServerDown с ключом; ручной SelectServer сбрасывает счётчик и «уже сообщали»
@@ -753,6 +753,29 @@ static class Program
         var one = Single(O("proxy", ip1), ip1);
         Check(one.FetchProxy == one.Outbounds[0], "FetchProxy одиночной — сам outbound");
 
+        // своё соединение у каждой программы: копии серверов и selector на программу, правило по имени и apps перед общим
+        var ap = JsonNode.Parse(ConfigBuilder.BuildVless(st, 9090, "t", prep with { Apps = ["chrome.exe", "Игра.exe"] }, RD))!.AsObject();
+        var obs = Arr(ap["outbounds"]).Select(x => Obj(x)).ToList();
+        var cs = obs.Single(x => Str(x["tag"]) == "proxy@chrome.exe");
+        Check(Str(cs["type"]) == "selector" && Arr(cs["outbounds"]).Select(Str).SequenceEqual(["s0@chrome.exe", "s1@chrome.exe", "s2@chrome.exe"])
+            && Str(cs["default"]) == "s1@chrome.exe" && cs["interrupt_exist_connections"]!.GetValue<bool>()
+            && Str(obs.Single(x => Str(x["tag"]) == "s2@Игра.exe")["server"]) == ip3.ToString() && obs.Count == 5 + 2 * 4,
+            "подписка по программам: у каждой копии серверов и свой selector");
+        Check(Str(prep.Outbounds[0]["tag"]) == "s0", "копии по программам не портят исходные outbound'ы");
+        var ar = Arr(Obj(ap["route"])["rules"]).Select(x => Obj(x)).ToList();
+        Check(ar.Count == 6 && Arr(ar[3]["process_name"]).Select(Str).SequenceEqual(["chrome.exe"]) && Arr(ar[3]["rule_set"]).Select(Str).SequenceEqual(["apps"])
+            && Str(ar[3]["outbound"]) == "proxy@chrome.exe" && Str(ar[4]["outbound"]) == "proxy@Игра.exe" && Str(ar[5]["outbound"]) == "proxy",
+            "правила по программам — до общего, и только пока программа в apps");
+        var sp = JsonNode.Parse(ConfigBuilder.BuildVless(st, 9090, "t", one with { Apps = ["chrome.exe"] }, RD))!.AsObject();
+        var so = Arr(sp["outbounds"]).Select(x => Obj(x)).ToList();
+        Check(so.Count == 3 && Str(so[1]["tag"]) == "proxy@chrome.exe" && Str(so[1]["server"]) == ip1.ToString() && Str(so[0]["tag"]) == "proxy",
+            "одиночная ссылка по программам: копия proxy на программу");
+
+        var fa = new FakeApi();
+        Check(Session.Pick(fa, prep with { Apps = ["chrome.exe", "Игра.exe"] }, "s2")
+            && fa.Selects.SequenceEqual([("proxy", "s2"), ("proxy@chrome.exe", "s2@chrome.exe"), ("proxy@Игра.exe", "s2@Игра.exe")]),
+            "Pick: сервер выбирается в общем selector и в каждой программе");
+
         var pr = JsonNode.Parse(ConfigBuilder.BuildProbe(prep.Outbounds, 9091, "sec"))!.AsObject();
         Check(!pr.ContainsKey("inbounds") && Str(Obj(Obj(pr["experimental"])["clash_api"])["external_controller"]) == "127.0.0.1:9091"
             && Str(Obj(Obj(pr["experimental"])["clash_api"])["secret"]) == "sec" && Str(Obj(pr["log"])["level"]) == "warn"
@@ -823,18 +846,23 @@ static class Program
         var plain = V(plainLink, files, @"C:\a\chrome.exe");
         Check(!Obj(Arr(plain["outbounds"])[0]).ContainsKey("tls"), "VLESS: без security нет tls");
 
-        // gRPC — как у Hiddify (ray2sing): ping при простое 15 с, ALPN h2, если в ссылке его нет
+        // gRPC: ping при простое 5 с, ALPN h2, если в ссылке его нет
         var go = Obj(Arr(V(grpcLink, files, @"C:\a\chrome.exe")["outbounds"])[0]);
         var gtr = Obj(go["transport"]);
-        Check(Str(gtr["type"]) == "grpc" && Str(gtr["service_name"]) == "svc" && Str(gtr["idle_timeout"]) == "15s" && Str(gtr["ping_timeout"]) == "15s"
-            && Arr(Obj(go["tls"])["alpn"]).Select(x => Str(x)).SequenceEqual(new[] { "h2" }), "VLESS: grpc idle/ping 15s, alpn h2");
+        Check(Str(gtr["type"]) == "grpc" && Str(gtr["service_name"]) == "svc" && Str(gtr["idle_timeout"]) == "5s" && Str(gtr["ping_timeout"]) == "5s"
+            && Arr(Obj(go["tls"])["alpn"]).Select(x => Str(x)).SequenceEqual(new[] { "h2" }), "VLESS: grpc idle/ping 5s, alpn h2");
         Check(!Obj(wo).ContainsKey("transport") || !Obj(wo["transport"]).ContainsKey("idle_timeout"), "VLESS: ws без idle_timeout");
 
         var dq = Arr(Obj(c["dns"])["servers"]);
-        var d0 = Obj(dq[0]);
-        Check(dq.Count == 1 && Str(d0["type"]) == "tcp" && Str(d0["tag"]) == "dns" && Str(d0["server"]) == "1.1.1.1" && Str(d0["detour"]) == "proxy"
-            && Str(Obj(c["dns"])["final"]) == "dns" && Str(Obj(c["route"])["default_domain_resolver"]) == "dns"
-            && !Obj(c["dns"]).ToJsonString().Contains("\"type\":\"local\""), "VLESS DNS: один сервер 1.1.1.1 по tcp через proxy, нет local");
+        var dt = dq.Select(x => Obj(x)).Single(x => Str(x["tag"]) == "dns");
+        Check(dq.Count == 2 && Str(dt["type"]) == "tcp" && Str(dt["server"]) == "1.1.1.1" && Str(dt["detour"]) == "proxy"
+            && dq.Any(x => Str(Obj(x)["tag"]) == "local" && Str(Obj(x)["type"]) == "local")
+            && Str(Obj(c["route"])["default_domain_resolver"]) == "dns", "VLESS DNS: 1.1.1.1 по tcp через proxy и запасной local");
+        var dr = Arr(Obj(c["dns"])["rules"]).Select(x => Obj(x)).ToList();
+        Check(dr.Count == 3 && Str(dr[0]["action"]) == "evaluate" && Str(dr[0]["server"]) == "dns" && Str(dr[0]["timeout"]) == "3s"
+            && dr[1]["match_response"]!.GetValue<bool>() && Str(dr[1]["action"]) == "respond"
+            && Str(dr[2]["action"]) == "route" && Str(dr[2]["server"]) == "local" && dr[2]["rewrite_ttl"]!.GetValue<int>() == 60,
+            "VLESS DNS: сначала туннель (3 с), не ответил — local с TTL 60 с");
         Check(Str(Obj(c["dns"])["strategy"]) == "ipv4_only", "VLESS DNS: только IPv4 (у сервера может не быть IPv6)");
 
         // снимки, отличающиеся программами, сайтами и списками, дают тот же конфиг: за них отвечают файлы правил
@@ -859,7 +887,7 @@ static class Program
         var ipNoSni = P("{\"type\":\"vless\",\"server\":\"1.2.3.4\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true}}");
         Check(!Obj(ipNoSni["tls"]).ContainsKey("server_name"), "ProxyOutbound: адрес-IP — server_name не выдумывается");
         var grpcAlpn = P("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"u\",\"tls\":{\"enabled\":true,\"alpn\":[\"http/1.1\"]},\"transport\":{\"type\":\"grpc\"}}");
-        Check(Arr(Obj(grpcAlpn["tls"])["alpn"]).Select(Str).SequenceEqual(["http/1.1"]) && Str(Obj(grpcAlpn["transport"])["idle_timeout"]) == "15s", "ProxyOutbound: gRPC со своим ALPN — ALPN не трогаем, idle 15s");
+        Check(Arr(Obj(grpcAlpn["tls"])["alpn"]).Select(Str).SequenceEqual(["http/1.1"]) && Str(Obj(grpcAlpn["transport"])["idle_timeout"]) == "5s", "ProxyOutbound: gRPC со своим ALPN — ALPN не трогаем, idle 5s");
         var hy2 = P("{\"type\":\"hysteria2\",\"server\":\"hy.example.com\",\"server_port\":443,\"password\":\"p\",\"tls\":{\"enabled\":true,\"server_name\":\"hy.example.com\"}}");
         Check(!hy2.ContainsKey("packet_encoding") && !hy2.ContainsKey("transport") && Str(hy2["tag"]) == "proxy", "ProxyOutbound: Hysteria2 без xudp и транспорта");
         var own = P("{\"type\":\"vless\",\"server\":\"nl.example.com\",\"server_port\":443,\"uuid\":\"u\",\"packet_encoding\":\"packetaddr\"}");
@@ -1155,7 +1183,7 @@ static class Program
                 var st = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "russia_inside" }, Sites = new List<string> { "example.com", "10.0.0.0/8" } };
                 var cfg = Path.Combine(tmp, name + ".json");
                 RuleFiles.Write(rd, st, f);
-                File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", Single(proxy, srv), rd));
+                File.WriteAllText(cfg, ConfigBuilder.BuildVless(st, 9090, "t", Single(proxy, srv) with { Apps = st.ProcessNames() }, rd));
                 Check(Run("check", "-c", cfg) == 0, "sing-box check: " + name);
                 if (name == "reality")
                 {
@@ -1183,7 +1211,7 @@ static class Program
             if (subs.Count == 3)
             {
                 var sst = new Settings { Mode = ProxyMode.Vless, VlessLink = "vless://x", Apps = A(@"C:\a\chrome.exe"), Lists = new List<string> { "russia_inside" } };
-                var sprep = new VlessPrep([srv, srv, srv], subs, "s1", f, new Dictionary<string, string>());
+                var sprep = new VlessPrep([srv, srv, srv], subs, "s1", f, new Dictionary<string, string>()) { Apps = sst.ProcessNames() };
                 var scfg = Path.Combine(tmp, "sub.json");
                 RuleFiles.Write(rd, sst, f);
                 File.WriteAllText(scfg, ConfigBuilder.BuildVless(sst, 9090, "t", sprep, rd));
@@ -1995,6 +2023,8 @@ static class Program
         var p = TrafficMath.Parse(two);
         Check(p.Count == 2 && p[0].ViaProxy && !p[1].ViaProxy && p[0].Upload == 10 && p[0].Download == 20 && p[1].Upload == 30 && p[1].Download == 40,
             "Parse: proxy и direct");
+        var own = TrafficMath.Parse("{\"connections\":[{\"id\":\"a\",\"upload\":1,\"download\":2,\"chains\":[\"s1@chrome.exe\",\"proxy@chrome.exe\"]}]}");
+        Check(own.Count == 1 && own[0].ViaProxy, "Parse: соединение программы (proxy@имя) — тоже через прокси");
         bool junk = true;
         foreach (var j in new[] { "not json", "", "{}", "{\"connections\":null}", "[1]" })
             try { junk &= TrafficMath.Parse(j).Count == 0; } catch { junk = false; }
@@ -2153,6 +2183,7 @@ static class Program
         Check(v.Error == null && v.Live == new Exits(true, false) && v.UdpOk == null && v.Vless != null && v.Vless.Ips[0].Equals(srv) && v.Vless.ListFiles.Count == 0
             && v.Warnings.SequenceEqual(new[] { "Список Telegram не загрузился", "Список YouTube не загрузился" }),
             "EvaluateVless: два Failed -> два предупреждения в порядке Failed");
+        Check(v.Vless!.Apps.SequenceEqual(["chrome.exe"]), "EvaluateVless: программы со своим соединением — из снимка");
         vs.Apps.Clear();
         v = Session.EvaluateVless(vs, Single(new JsonObject(), srv), NoFiles("telegram", "youtube"));
         Check(v.Error == "Списки не загрузились" && v.Vless == null && v.Warnings.Count == 0, "EvaluateVless: нет программ и ни одного файла -> ошибка");
@@ -3101,7 +3132,10 @@ sealed class FakeApi : IClashApi
         try { if (Wait > TimeSpan.Zero) Thread.Sleep(Wait); if (fromQueue) return queued; return Delays.TryGetValue(tag, out var d) ? d : null; }
         finally { Interlocked.Decrement(ref cur); }
     }
-    public bool Select(string group, string tag) { Selected = (group, tag); return true; }
+    public List<(string Group, string Tag)> Selects = new();
+    // выбрано в group и в копии программы chrome.exe (Sub в тестах Session)
+    public bool Picked(string tag) { lock (Selects) return Selects.LastOrDefault(x => x.Group == "proxy").Tag == tag && Selects.LastOrDefault(x => x.Group == "proxy@chrome.exe").Tag == tag + "@chrome.exe"; }
+    public bool Select(string group, string tag) { Selected = (group, tag); lock (Selects) Selects.Add((group, tag)); return true; }
 }
 
 // Подмена VlessDeps: считает вызовы, запоминает id списков и адрес Clash API. По умолчанию имя не разрешается,

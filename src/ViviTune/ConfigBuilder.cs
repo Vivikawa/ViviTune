@@ -114,6 +114,15 @@ namespace ViviTune
                 outbounds.Add(D("type", "selector", "tag", "proxy", "outbounds", p.Outbounds.Select(o => (object)(string)o["tag"]!).ToArray(),
                     "default", p.Selected, "interrupt_exist_connections", true));
             outbounds.AddRange(p.Outbounds);
+            // у каждой программы из p.Apps своё соединение с сервером: копия proxy (у подписки — копии серверов и свой selector),
+            // зависшее или забитое соединение одной программы не трогает остальные. Сайты, списки и DNS — общим proxy.
+            foreach (var n in p.Apps)
+            {
+                if (p.Selected == null) { outbounds.Add(Retag(p.Outbounds[0], PerApp("proxy", n))); continue; }
+                outbounds.AddRange(p.Outbounds.Select(o => Retag(o, PerApp((string)o["tag"]!, n))));
+                outbounds.Add(D("type", "selector", "tag", PerApp("proxy", n), "outbounds", p.Outbounds.Select(o => (object)PerApp((string)o["tag"]!, n)).ToArray(),
+                    "default", PerApp(p.Selected, n), "interrupt_exist_connections", true));
+            }
             outbounds.Add(D("type", "direct", "tag", "direct"));
 
             // один набор на всё: каждый список каталога всегда в конфиге (выключенный — пустой файл)
@@ -124,19 +133,41 @@ namespace ViviTune
             {
                 D("action", "sniff"),
                 D("protocol", "dns", "action", "hijack-dns"),
-                D("ip_cidr", cidrs, "outbound", "direct"),
-                D("rule_set", tags, "outbound", "proxy")
+                D("ip_cidr", cidrs, "outbound", "direct")
             };
+            // и rule_set apps: убранная из списка программа сразу перестаёт идти через прокси, без перезапуска
+            rules.AddRange(p.Apps.Select(n => (object)D("process_name", new[] { n }, "rule_set", new[] { RuleFiles.Apps }, "outbound", PerApp("proxy", n))));
+            rules.Add(D("rule_set", tags, "outbound", "proxy"));
 
             // весь DNS компьютера — к 1.1.1.1 через туннель: провайдер его не видит и не подменяет.
+            // Туннель завис (пока gRPC не заметит) — через 3 с отвечает DNS системы, иначе встаёт и прямой трафик;
+            // его ответ живёт 60 с, чтобы подменённый провайдером адрес не застрял в кэше.
             // Только IPv4: у многих VLESS-серверов нет IPv6, и соединение к AAAA-адресу молча глохнет (голос Discord).
             // ponytail: IPv6-литералы без DNS всё ещё уходят в IPv6; опция «есть IPv6», если найдётся сервер с ним
             var config = Head(apiPort, apiSecret, s.SingBoxLog);
-            config["dns"] = D("servers", new object[] { D("type", "tcp", "tag", "dns", "server", "1.1.1.1", "detour", "proxy") }, "final", "dns", "strategy", "ipv4_only");
+            config["dns"] = D(
+                "servers", new object[] { D("type", "tcp", "tag", "dns", "server", "1.1.1.1", "detour", "proxy"), D("type", "local", "tag", "local") },
+                "rules", new object[]
+                {
+                    D("action", "evaluate", "server", "dns", "timeout", "3s"),
+                    D("match_response", true, "action", "respond"),
+                    D("action", "route", "server", "local", "rewrite_ttl", 60)
+                },
+                "strategy", "ipv4_only");
             config["inbounds"] = Tun(true, ipv6);
             config["outbounds"] = outbounds.ToArray();
             config["route"] = D("rules", rules.ToArray(), "rule_set", sets.ToArray(), "final", "direct", "auto_detect_interface", true, "find_process", true, "default_domain_resolver", "dns");
             return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
+        }
+
+        // Тег копии outbound'а для программы: proxy@chrome.exe, s1@chrome.exe
+        public static string PerApp(string tag, string app) => tag + "@" + app;
+
+        static JsonObject Retag(JsonObject o, string tag)
+        {
+            var c = (JsonObject)o.DeepClone();
+            c["tag"] = tag;
+            return c;
         }
 
         // Временный sing-box без TUN для пинга серверов подписки через Clash API: только outbound'ы, трафик системы не трогает.
@@ -186,9 +217,9 @@ namespace ViviTune
             if (tr != null && ttype == "grpc")
             {
                 if (tlsOn && !tls!.ContainsKey("alpn")) tls["alpn"] = new JsonArray("h2"); // gRPC — это HTTP/2
-                // ping HTTP/2 после 15 с тишины, нет ответа 15 с — новое соединение
-                if (!tr.ContainsKey("idle_timeout")) tr["idle_timeout"] = "15s";
-                if (!tr.ContainsKey("ping_timeout")) tr["ping_timeout"] = "15s";
+                // ping HTTP/2 после 5 с тишины, нет ответа 5 с — новое соединение: замёрзшее соединение держит туннель не дольше ~10 с
+                if (!tr.ContainsKey("idle_timeout")) tr["idle_timeout"] = "5s";
+                if (!tr.ContainsKey("ping_timeout")) tr["ping_timeout"] = "5s";
             }
             return o;
         }

@@ -42,6 +42,10 @@ public sealed class CheckFailedException(string message) : Exception(message);
 public sealed record VlessPrep(IReadOnlyList<IPAddress> Ips, IReadOnlyList<JsonObject> Outbounds, string? Selected,
     IReadOnlyDictionary<string, string> ListFiles, IReadOnlyDictionary<string, string> Keys)
 {
+    // программы со своим соединением с сервером (ConfigBuilder.PerApp): снимок на момент сборки конфига,
+    // добавленные потом идут общим proxy до переподключения
+    public IReadOnlyList<string> Apps { get; init; } = [];
+
     // outbound для скачивания списков: одиночный как есть, у подписки — копия выбранного с тегом proxy
     public JsonObject FetchProxy
     {
@@ -648,8 +652,12 @@ public sealed class Session : IDisposable
     {
         if (s.ProcessNames().Count == 0 && s.Sites.Count == 0 && lists.Files.Count == 0) return ErrorVerdict("Списки не загрузились");
         var w = lists.Failed.Select(id => $"Список {ListName(id)} не загрузился").ToList();
-        return new Verdict(new Exits(true, false), w, null, null, basis with { ListFiles = lists.Files });
+        return new Verdict(new Exits(true, false), w, null, null, basis with { ListFiles = lists.Files, Apps = s.ProcessNames() });
     }
+
+    // Сервер подписки выбирается и в общем selector, и в selector'е каждой программы.
+    public static bool Pick(IClashApi a, VlessPrep p, string tag) =>
+        a.Select("proxy", tag) && p.Apps.All(n => a.Select(ConfigBuilder.PerApp("proxy", n), ConfigBuilder.PerApp(tag, n)));
 
     static Verdict ErrorVerdict(string error) => new(default, [], error, null);
 
@@ -690,7 +698,7 @@ public sealed class Session : IDisposable
                     pings = Pinger.Ping(clash, sub.Outbounds.Select(o => (string)o["tag"]!).ToList(), vless.PingMs, vless.PingCap, null, ct);
                     var best = ct.IsCancellationRequested ? null : Pinger.Fastest(pings);
                     if (best == sub.Selected) picked = best;
-                    else if (best != null && clash.Select("proxy", best)) picked = best;
+                    else if (best != null && Pick(clash, sub, best)) picked = best;
                 }
             }
             if (v.Vless != null && vless!.AfterStart(port, secret, ct) is { } err)
@@ -735,7 +743,7 @@ public sealed class Session : IDisposable
             tag => // под sync watch: Reset (ручной выбор) ждёт, пока это переключение и обновление состояния закончатся
             {
                 var key = p.Keys.GetValueOrDefault(tag);
-                if (key == null || !a.Select("proxy", tag)) return false;
+                if (key == null || !Pick(a, p, tag)) return false;
                 lock (gate)
                 {
                     if (watch != w || state != ConnState.Connected || prep == null) return true; // отключили: переключать уже некому
@@ -773,18 +781,18 @@ public sealed class Session : IDisposable
     // Переключение сервера подписки без перезапуска (Clash API). Вызывать не в UI-потоке.
     public bool SelectServer(string key)
     {
-        IClashApi a; string tag; int e; ServerWatch? w;
+        IClashApi a; string tag; int e; ServerWatch? w; VlessPrep p;
         lock (gate)
         {
-            if (state != ConnState.Connected || api == null || prep is not { Selected: not null } p) return false;
-            var kv = p.Keys.FirstOrDefault(x => x.Value == key);
+            if (state != ConnState.Connected || api == null || prep is not { Selected: not null } cur) return false;
+            var kv = cur.Keys.FirstOrDefault(x => x.Value == key);
             if (kv.Key == null) return false;
-            a = api; tag = kv.Key; e = epoch; w = watch;
+            a = api; tag = kv.Key; e = epoch; w = watch; p = cur;
         }
         // до Select и вне gate: ждёт идущее переключение watch и отменяет начатое (оно под sync, а внутри берёт gate)
         w?.Reset();
         bool ok;
-        try { ok = a.Select("proxy", tag); }
+        try { ok = Pick(a, p, tag); }
         catch { ok = false; }
         if (!ok) return false;
         lock (gate)

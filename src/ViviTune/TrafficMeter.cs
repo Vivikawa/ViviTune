@@ -29,7 +29,7 @@ public static class TrafficMath
                 bool proxy = false;
                 if (c.TryGetProperty("chains", out var ch) && ch.ValueKind == JsonValueKind.Array)
                     foreach (var x in ch.EnumerateArray())
-                        if (x.ValueKind == JsonValueKind.String && x.GetString() == "proxy") { proxy = true; break; }
+                        if (x.ValueKind == JsonValueKind.String && x.GetString() is { } t && (t == "proxy" || t.StartsWith("proxy@", StringComparison.Ordinal))) { proxy = true; break; }
                 list.Add(new ConnSample(id, up, down, proxy));
             }
         }
