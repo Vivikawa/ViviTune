@@ -746,7 +746,7 @@ static class Program
         var sel = Obj(Arr(c["outbounds"])[0]);
         Check(Str(sel["type"]) == "selector" && Str(sel["tag"]) == "proxy" && Arr(sel["outbounds"]).Select(Str).SequenceEqual(["s0", "s1", "s2"]) && Str(sel["default"]) == "s1" && sel["interrupt_exist_connections"]!.GetValue<bool>(), "подписка: selector proxy с выбранным по умолчанию");
         var cidrs = Arr(Obj(Arr(Obj(c["route"])["rules"])[2])["ip_cidr"]).Select(Str).ToList();
-        Check(Arr(c["outbounds"]).Count == 5 && cidrs.SequenceEqual(["203.0.113.1/32", "203.0.113.2/32", "2001:db8::3/128"]), "подписка: 3 сервера + direct, все IP мимо туннеля");
+        Check(Arr(c["outbounds"]).Count == 5 && cidrs.SequenceEqual(["203.0.113.1/32", "203.0.113.2/32", "2001:db8::3/128", "198.18.0.0/15"]), "подписка: 3 сервера + direct, все IP мимо туннеля");
         Check(Str(Obj(Arr(c["outbounds"])[4])["tag"]) == "direct", "подписка: direct последним");
         Check(Str(prep.FetchProxy["tag"]) == "proxy" && Str(prep.FetchProxy["server"]) == ip2.ToString(), "FetchProxy — выбранный с тегом proxy");
         Check(Str(prep.Outbounds[1]["tag"]) == "s1", "FetchProxy не портит исходный outbound");
@@ -859,10 +859,13 @@ static class Program
             && dq.Any(x => Str(Obj(x)["tag"]) == "local" && Str(Obj(x)["type"]) == "local")
             && Str(Obj(c["route"])["default_domain_resolver"]) == "dns", "VLESS DNS: 1.1.1.1 по tcp через proxy и запасной local");
         var dr = Arr(Obj(c["dns"])["rules"]).Select(x => Obj(x)).ToList();
-        Check(dr.Count == 3 && Str(dr[0]["action"]) == "evaluate" && Str(dr[0]["server"]) == "dns" && Str(dr[0]["timeout"]) == "3s"
-            && dr[1]["match_response"]!.GetValue<bool>() && Str(dr[1]["action"]) == "respond"
-            && Str(dr[2]["action"]) == "route" && Str(dr[2]["server"]) == "local" && dr[2]["rewrite_ttl"]!.GetValue<int>() == 60,
-            "VLESS DNS: сначала туннель (3 с), не ответил — local с TTL 60 с");
+        Check(dr.Count == 5 && Str(dr[0]["action"]) == "evaluate" && Str(dr[0]["server"]) == "local" && Str(dr[0]["tag"]) == "sys" && Str(dr[0]["timeout"]) == "3s" && dr[0]["rewrite_ttl"]!.GetValue<int>() == 60
+            && Str(dr[1]["action"]) == "evaluate" && Str(dr[1]["server"]) == "dns" && Str(dr[1]["tag"]) == "vpn" && Str(dr[1]["timeout"]) == "3s"
+            && Str(dr[2]["match_response"]) == "sys" && Arr(dr[2]["ip_cidr"]).Select(Str).SequenceEqual(["198.18.0.0/15"]) && Str(dr[2]["action"]) == "respond" && dr[2]["race"]!.GetValue<bool>()
+            && Str(dr[3]["match_response"]) == "vpn" && Str(dr[3]["response_rcode"]) == "NOERROR" && Str(dr[3]["action"]) == "respond"
+            && Str(dr[4]["match_response"]) == "sys" && Str(dr[4]["action"]) == "respond",
+            "VLESS DNS: туннель и система параллельно; FakeIP системы сразу, иначе туннель, не знает или молчит 3 с — система с TTL 60 с");
+        Check(Arr(Obj(rules[iIp])["ip_cidr"]).Select(Str).Last() == "198.18.0.0/15", "VLESS: FakeIP роутера напрямую");
         Check(Str(Obj(c["dns"])["strategy"]) == "ipv4_only", "VLESS DNS: только IPv4 (у сервера может не быть IPv6)");
 
         // снимки, отличающиеся программами, сайтами и списками, дают тот же конфиг: за них отвечают файлы правил

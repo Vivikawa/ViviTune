@@ -108,7 +108,8 @@ namespace ViviTune
         {
             var err = s.Validate();
             if (err != null) throw new InvalidOperationException(err);
-            var cidrs = p.Ips.Select(ip => (object)(ip + (ip.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32"))).ToArray();
+            // и FakeIP роутера (Podkop и т. п.): такой адрес знает только роутер, ему и отдаём
+            var cidrs = p.Ips.Select(ip => (object)(ip + (ip.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32"))).Append(FakeIp).ToArray();
             var outbounds = new List<object>();
             if (p.Selected != null)
                 outbounds.Add(D("type", "selector", "tag", "proxy", "outbounds", p.Outbounds.Select(o => (object)(string)o["tag"]!).ToArray(),
@@ -139,9 +140,10 @@ namespace ViviTune
             rules.AddRange(p.Apps.Select(n => (object)D("process_name", new[] { n }, "rule_set", new[] { RuleFiles.Apps }, "outbound", PerApp("proxy", n))));
             rules.Add(D("rule_set", tags, "outbound", "proxy"));
 
-            // весь DNS компьютера — к 1.1.1.1 через туннель: провайдер его не видит и не подменяет.
-            // Туннель завис (пока gRPC не заметит) — через 3 с отвечает DNS системы, иначе встаёт и прямой трафик;
-            // его ответ живёт 60 с, чтобы подменённый провайдером адрес не застрял в кэше.
+            // весь DNS компьютера идёт через ViviTune: каждое имя сразу и к 1.1.1.1 через туннель, и в DNS системы.
+            // Берём ответ туннеля (провайдер его не подменит); ответ системы — если это FakeIP роутера (Podkop и т. п.),
+            // если туннель имени не знает (внутренние имена корпоративного VPN, OpenWrt.lan) или не ответил за 3 с
+            // (gRPC завис — иначе встаёт и прямой трафик). Ответ системы живёт 60 с: подменённый провайдером адрес не застрянет в кэше.
             // Только IPv4: у многих VLESS-серверов нет IPv6, и соединение к AAAA-адресу молча глохнет (голос Discord).
             // ponytail: IPv6-литералы без DNS всё ещё уходят в IPv6; опция «есть IPv6», если найдётся сервер с ним
             var config = Head(apiPort, apiSecret, s.SingBoxLog);
@@ -149,9 +151,11 @@ namespace ViviTune
                 "servers", new object[] { D("type", "tcp", "tag", "dns", "server", "1.1.1.1", "detour", "proxy"), D("type", "local", "tag", "local") },
                 "rules", new object[]
                 {
-                    D("action", "evaluate", "server", "dns", "timeout", "3s"),
-                    D("match_response", true, "action", "respond"),
-                    D("action", "route", "server", "local", "rewrite_ttl", 60)
+                    D("action", "evaluate", "server", "local", "tag", "sys", "timeout", "3s", "rewrite_ttl", 60),
+                    D("action", "evaluate", "server", "dns", "tag", "vpn", "timeout", "3s"),
+                    D("match_response", "sys", "ip_cidr", new[] { FakeIp }, "action", "respond", "race", true),
+                    D("match_response", "vpn", "response_rcode", "NOERROR", "action", "respond"),
+                    D("match_response", "sys", "action", "respond")
                 },
                 "strategy", "ipv4_only");
             config["inbounds"] = Tun(true, ipv6);
@@ -159,6 +163,9 @@ namespace ViviTune
             config["route"] = D("rules", rules.ToArray(), "rule_set", sets.ToArray(), "final", "direct", "auto_detect_interface", true, "find_process", true, "default_domain_resolver", "dns");
             return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
         }
+
+        // Диапазон FakeIP sing-box по умолчанию (им же пользуется Podkop)
+        const string FakeIp = "198.18.0.0/15";
 
         // Тег копии outbound'а для программы: proxy@chrome.exe, s1@chrome.exe
         public static string PerApp(string tag, string app) => tag + "@" + app;
