@@ -34,9 +34,11 @@ namespace ViviTune
 
             // null: прокси жив, bypass жив, если задан порт
             var l = live ?? new Exits(true, s.DirectPort != null);
-            bool proxyRule = l.Proxy && s.ProcessNames().Count > 0;
-            bool bypassRule = l.Bypass && s.DirectPort != null && s.BypassNames().Count > 0;
-            if (!proxyRule && !bypassRule)
+            if (s.RouteAllTraffic && !l.Proxy)
+                throw new InvalidOperationException("Прокси недоступен: режим всего трафика требует работающего прокси");
+            bool proxyRule = l.Proxy && !s.RouteAllTraffic && s.ProcessNames().Count > 0;
+            bool bypassRule = !s.RouteAllTraffic && l.Bypass && s.DirectPort != null && s.BypassNames().Count > 0;
+            if (!s.RouteAllTraffic && !proxyRule && !bypassRule)
                 throw new InvalidOperationException("Нет правил: ни одного живого выхода с программами");
             var ip = IPAddress.Parse(s.Ip);
             var cidr = ip + (ip.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32");
@@ -75,15 +77,17 @@ namespace ViviTune
                     D("type", "tcp", "tag", "proxy-dns", "server", "1.1.1.1", "detour", "proxy")
                 },
                 "rules", proxyRule ? new object[] { D("rule_set", new[] { RuleFiles.Apps }, "server", "proxy-dns") } : Array.Empty<object>());
-            config["inbounds"] = Tun(false, ipv6);
+            if (s.RouteAllTraffic)
+                config["dns"] = GlobalDns("proxy-dns");
+            config["inbounds"] = Tun(false, ipv6, s.RouteAllTraffic);
             config["outbounds"] = outbounds.ToArray();
             config["route"] = D(
                 "rules", rules.ToArray(),
                 "rule_set", sets.ToArray(),
-                "final", "direct",
+                "final", s.RouteAllTraffic ? "proxy" : "direct",
                 "auto_detect_interface", true,
                 "find_process", true,
-                "default_domain_resolver", "local");
+                "default_domain_resolver", s.RouteAllTraffic ? "proxy-dns" : "local");
 
             return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
         }
@@ -95,9 +99,9 @@ namespace ViviTune
 
         // VLESS: mtu 9000, как у Hiddify (без него sing-box 1.12 на Windows берёт 65535); SOCKS5 не трогаем.
         // ipv6=false: в Windows IPv6 выключен — sing-tun упал бы на «set ipv6 address: Element not found».
-        static object[] Tun(bool vless, bool ipv6)
+        static object[] Tun(bool vless, bool ipv6, bool all = false)
         {
-            var tun = D("type", "tun", "tag", "tun-in", "address", ipv6 ? new object[] { "172.19.0.1/30", "fdfe:dcba:9876::1/126" } : new object[] { "172.19.0.1/30" }, "auto_route", true, "strict_route", vless);
+            var tun = D("type", "tun", "tag", "tun-in", "address", ipv6 ? new object[] { "172.19.0.1/30", "fdfe:dcba:9876::1/126" } : new object[] { "172.19.0.1/30" }, "auto_route", true, "strict_route", vless || all);
             if (vless) tun["mtu"] = 9000;
             return new object[] { tun };
         }
@@ -109,7 +113,7 @@ namespace ViviTune
             var err = s.Validate();
             if (err != null) throw new InvalidOperationException(err);
             // и FakeIP роутера (Podkop и т. п.): такой адрес знает только роутер, ему и отдаём
-            var cidrs = p.Ips.Select(ip => (object)(ip + (ip.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32"))).Append(FakeIp).ToArray();
+            var cidrs = p.Ips.Select(ip => (object)(ip + (ip.AddressFamily == AddressFamily.InterNetworkV6 ? "/128" : "/32"))).Concat(s.RouteAllTraffic ? Array.Empty<object>() : new object[] { FakeIp }).ToArray();
             var outbounds = new List<object>();
             if (p.Selected != null)
                 outbounds.Add(D("type", "selector", "tag", "proxy", "outbounds", p.Outbounds.Select(o => (object)(string)o["tag"]!).ToArray(),
@@ -158,11 +162,18 @@ namespace ViviTune
                     D("match_response", "sys", "action", "respond")
                 },
                 "strategy", "ipv4_only");
+            if (s.RouteAllTraffic)
+                config["dns"] = GlobalDns("dns");
             config["inbounds"] = Tun(true, ipv6);
             config["outbounds"] = outbounds.ToArray();
-            config["route"] = D("rules", rules.ToArray(), "rule_set", sets.ToArray(), "final", "direct", "auto_detect_interface", true, "find_process", true, "default_domain_resolver", "dns");
+            config["route"] = D("rules", rules.ToArray(), "rule_set", sets.ToArray(), "final", s.RouteAllTraffic ? "proxy" : "direct", "auto_detect_interface", true, "find_process", true, "default_domain_resolver", "dns");
             return JsonSerializer.Serialize(config, Json.DictionaryStringObject);
         }
+
+        // В глобальном режиме DNS не обращается к системному резолверу и не откатывается на него.
+        static Dictionary<string, object> GlobalDns(string tag) => D(
+            "servers", new object[] { D("type", "tcp", "tag", tag, "server", "1.1.1.1", "detour", "proxy") },
+            "final", tag, "strategy", "ipv4_only");
 
         // Диапазон FakeIP sing-box по умолчанию (им же пользуется Podkop)
         const string FakeIp = "198.18.0.0/15";

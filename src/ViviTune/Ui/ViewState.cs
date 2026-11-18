@@ -51,6 +51,13 @@ public sealed class ViewState : Observable
     public event Action<string, bool>? SetAppEnabledRequested;
     public event Action<string, int, int?>? SetProxyRequested;
     public event Action<ProxyMode>? SetModeRequested;
+    public event Action<bool>? SetRouteAllTrafficRequested;
+    bool routeAllTraffic;
+    public bool RouteAllTraffic { get => routeAllTraffic; set { routeAllTraffic = value; Notify(nameof(RouteAllTraffic)); } }
+    public void RequestSetRouteAllTraffic(bool on)
+    {
+        if (SettingsEditable && on != routeAllTraffic) SetRouteAllTrafficRequested?.Invoke(on);
+    }
     public event Action<string>? SetVlessRequested; // ссылка
     public event Action<string, bool>? SetListEnabledRequested; // id списка
     public event Action<IReadOnlyList<string>>? AddSitesRequested; // нормализованные новые записи

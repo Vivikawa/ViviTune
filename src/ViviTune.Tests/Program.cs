@@ -20,7 +20,9 @@ static class Program
     {
         // Зависший «движок» для проверки таймаута Links.Engine: сам тестовый exe с аргументами decode-link
         if (args.Length > 0 && args[0] == "tools") { Thread.Sleep(Timeout.Infinite); return 0; }
+        if (args.Contains("--all-traffic")) { AllTrafficTests(); return failures == 0 ? 0 : 1; }
         SettingsTests();
+        AllTrafficTests();
         ConfigTests();
         ProbeTests();
         TrafficTests();
@@ -1227,6 +1229,15 @@ static class Program
             RuleFiles.Write(rd, both, f);
             File.WriteAllText(sc, ConfigBuilder.Build(both, 9090, "t", rd));
             Check(Run("check", "-c", sc) == 0, "sing-box check: SOCKS5 с apps и bypass");
+            both.RouteAllTraffic = true;
+            both.Apps.Clear();
+            File.WriteAllText(sc, ConfigBuilder.Build(both, 9090, "t", rd));
+            Check(Run("check", "-c", sc) == 0, "sing-box check: SOCKS5 весь трафик без приложений");
+            var global = new Settings { Mode = ProxyMode.Vless, VlessLink = Reality, RouteAllTraffic = true };
+            RuleFiles.Write(rd, global, new Dictionary<string, string>());
+            var globalServer = new Server("global", new JsonObject { ["type"] = "vless", ["server"] = srv.ToString(), ["server_port"] = 443, ["uuid"] = U }, []);
+            File.WriteAllText(sc, ConfigBuilder.BuildVless(global, 9090, "t", Single(ConfigBuilder.ProxyOutbound(globalServer, srv), srv), rd));
+            Check(Run("check", "-c", sc) == 0, "sing-box check: VLESS весь трафик без приложений и сайтов");
         }
         finally { try { Directory.Delete(tmp, true); } catch { } }
     }
@@ -1406,6 +1417,65 @@ static class Program
     }
 
     static List<AppEntry> A(params string[] paths) => paths.Select(x => new AppEntry { Path = x }).ToList();
+
+    static void AllTrafficTests()
+    {
+        var s = new Settings { RouteAllTraffic = true };
+        Check(s.Validate() == null && s.Clone().RouteAllTraffic, "Весь трафик: пустые списки допустимы, снимок сохраняет режим");
+        var path = Path.GetTempFileName();
+        try
+        {
+            s.Save(path);
+            Check(Settings.Load(path).RouteAllTraffic, "Весь трафик: сохранение и загрузка");
+            File.WriteAllText(path, "{}");
+            Check(!Settings.Load(path).RouteAllTraffic, "Старые настройки остаются выборочными");
+        }
+        finally { File.Delete(path); }
+        s.DirectPort = s.Port;
+        s.DirectApps = A("bypass.exe");
+        Check(s.Validate() == null, "Весь трафик: неиспользуемый bypass не мешает подключению");
+        var c = Cfg(s);
+        Check(c["route"]!["final"]!.GetValue<string>() == "proxy", "SOCKS5: маршрут по умолчанию через прокси");
+        Check(c["inbounds"]![0]!["strict_route"]!.GetValue<bool>(), "SOCKS5: strict_route включён");
+        Check(c["dns"]!["final"]!.GetValue<string>() == "proxy-dns" && c["dns"]!["servers"]!.AsArray().Count == 1,
+            "SOCKS5: DNS только через прокси");
+        Check(!c["outbounds"]!.AsArray().Any(o => o!["tag"]!.GetValue<string>() == "bypass"), "Весь трафик: bypass не создаётся");
+        Check(Session.Evaluate(s, Up(s.Ip, s.Port), null).Error == null, "Весь трафик: проверка прокси без приложений");
+        Check(Session.Evaluate(s, DownProbe(s.Ip, s.Port), Up(s.Ip, s.Port)).Error != null, "Весь трафик: bypass не заменяет недоступный прокси");
+        s.Mode = ProxyMode.Vless;
+        s.VlessLink = Reality;
+        var ip = IPAddress.Parse("203.0.113.7");
+        var prep = Single(new JsonObject { ["type"] = "direct", ["tag"] = "proxy" }, ip);
+        Check(Session.EvaluateVless(s, prep, NoFiles()).Error == null, "VLESS: не требует приложений, сайтов или загруженных списков");
+        c = JsonNode.Parse(ConfigBuilder.BuildVless(s, 9090, "t", prep, RD))!.AsObject();
+        Check(c["route"]!["final"]!.GetValue<string>() == "proxy" && c["dns"]!["final"]!.GetValue<string>() == "dns",
+            "VLESS: трафик и DNS по умолчанию через прокси");
+        Check(!c["route"]!["rules"]!.ToJsonString().Contains("198.18.0.0/15"), "VLESS: FakeIP не выпускается напрямую в глобальном режиме");
+        var view = new ViewState();
+        int requests = 0;
+        view.SetRouteAllTrafficRequested += _ => requests++;
+        view.RequestSetRouteAllTraffic(true);
+        view.State = ConnState.Connected;
+        view.RequestSetRouteAllTraffic(true);
+        Check(requests == 1, "Переключатель всего трафика доступен только после отключения");
+        var dir = Directory.CreateTempSubdirectory("vivitune-global-").FullName;
+        try
+        {
+            var settings = new Settings { RouteAllTraffic = true };
+            var engine = new FakeSingBox();
+            using var session = new Session(settings, engine, Path.Combine(dir, "config.json"), Up, Delay);
+            Check(session.ConnectAsync().Wait(2000) && session.State == ConnState.Connected,
+                "Весь трафик: сессия подключается с пустыми списками");
+            settings.Apps = A("test.exe");
+            session.AppsChanged();
+            settings.Apps.Clear();
+            session.AppsChanged();
+            Check(session.State == ConnState.Connected && engine.Starts == 1,
+                "Весь трафик: очистка приложений не отключает сессию и не перезапускает движок");
+            session.Disconnect();
+        }
+        finally { Directory.Delete(dir, true); }
+    }
 
     static void SettingsTests()
     {

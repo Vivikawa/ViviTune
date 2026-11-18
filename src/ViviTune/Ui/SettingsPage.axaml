@@ -43,6 +43,19 @@
     <TextBlock Classes="title" Text="Настройки" />
     <ScrollViewer Grid.Row="1" Margin="0,14,0,0" HorizontalAlignment="Left" VerticalAlignment="Top">
       <StackPanel Width="460" Spacing="8" Margin="0,0,12,0">
+        <TextBlock Text="Маршрутизация" FontWeight="SemiBold" />
+        <Border Classes="card">
+          <StackPanel Spacing="8">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="Весь трафик через прокси" VerticalAlignment="Center" />
+              <ToggleButton Grid.Column="1" Theme="{StaticResource Switch}"
+                            IsChecked="{Binding RouteAllTraffic, Mode=OneWay}" IsEnabled="{Binding SettingsEditable}"
+                            Click="OnRouteAllTraffic" AutomationProperties.Name="Весь трафик через прокси" />
+            </Grid>
+            <TextBlock Classes="muted" TextWrapping="Wrap"
+                       Text="Все приложения и DNS через выбранный SOCKS5 или VLESS. Списки приложений, сайтов и «Мимо Podkop» не ограничивают этот режим. Меняется после отключения." />
+          </StackPanel>
+        </Border>
         <TextBlock Text="SOCKS5" FontWeight="SemiBold" />
         <!-- Блок неактивного режима бледнее, но поля остаются редактируемыми -->
         <Border Classes="card" Classes.off="{Binding IsVless}">

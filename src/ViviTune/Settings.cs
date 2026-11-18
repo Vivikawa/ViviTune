@@ -27,6 +27,7 @@ namespace ViviTune
 
         public string Ip { get; set; } = "192.168.1.1";
         public int Port { get; set; } = 1818;
+        public bool RouteAllTraffic { get; set; }
         public List<AppEntry> Apps { get; set; } = new List<AppEntry>();
         public int? DirectPort { get; set; } // порт SOCKS5 «Мимо Podkop»; null — не задан
         public List<AppEntry> DirectApps { get; set; } = new List<AppEntry>();
@@ -81,6 +82,7 @@ namespace ViviTune
                         s.Mode = mode.Equals("vless", StringComparison.OrdinalIgnoreCase) ? ProxyMode.Vless : ProxyMode.Socks5;
                     else if (kv.Key.Equals("VlessLink", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue lv && lv.TryGetValue<string>(out var link)) s.VlessLink = link;
                     else if (kv.Key.Equals("Server", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue sv0 && sv0.TryGetValue<string>(out var srvKey) && srvKey != "") s.Server = srvKey;
+                    else if (kv.Key.Equals("RouteAllTraffic", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue rv && rv.TryGetValue<bool>(out var all)) s.RouteAllTraffic = all;
                     else if (kv.Key.Equals("AutoServer", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue av && av.TryGetValue<bool>(out var auto)) s.AutoServer = auto;
                     else if (kv.Key.Equals("SingBoxLog", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonValue bv && bv.TryGetValue<string>(out var lvl) && lvl.ToLowerInvariant() is "trace" or "debug" or "info" or "warn" or "error") s.SingBoxLog = lvl.ToLowerInvariant();
                     else if (kv.Key.Equals("Lists", StringComparison.OrdinalIgnoreCase) && kv.Value is JsonArray larr)
@@ -123,10 +125,10 @@ namespace ViviTune
             if (Mode == ProxyMode.Vless)
             {
                 var link = VlessLink?.Trim() ?? "";
-                return link == "" ? "Вставьте ссылку в настройках" : !link.Contains("://") ? "Это не ссылка" : (ProcessNames().Count + Lists.Count + Sites.Count == 0 ? "Добавьте приложение или сайт либо включите список" : null);
+                return link == "" ? "Вставьте ссылку в настройках" : !link.Contains("://") ? "Это не ссылка" : (!RouteAllTraffic && ProcessNames().Count + Lists.Count + Sites.Count == 0 ? "Добавьте приложение или сайт либо включите список" : null);
             }
-            return ValidateProxy(Ip, Port) ?? ValidateDirectPort(DirectPort, Port)
-                ?? (ProcessNames().Count + BypassNames().Count == 0 ? "Добавьте хотя бы одно приложение" : null);
+            return ValidateProxy(Ip, Port) ?? (RouteAllTraffic ? null : ValidateDirectPort(DirectPort, Port))
+                ?? (!RouteAllTraffic && ProcessNames().Count + BypassNames().Count == 0 ? "Добавьте хотя бы одно приложение" : null);
         }
 
         // Только адрес прокси (для страницы настроек): null, если IP и порт корректны.
@@ -157,7 +159,7 @@ namespace ViviTune
         public Settings Clone() => new Settings
         {
             Ip = Ip, Port = Port, DirectPort = DirectPort, SingBoxLog = SingBoxLog,
-            Mode = Mode, VlessLink = VlessLink, Server = Server, AutoServer = AutoServer, Lists = Lists.ToList(), Sites = Sites.ToList(),
+            RouteAllTraffic = RouteAllTraffic, Mode = Mode, VlessLink = VlessLink, Server = Server, AutoServer = AutoServer, Lists = Lists.ToList(), Sites = Sites.ToList(),
             Apps = Apps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList(),
             DirectApps = DirectApps.Select(a => new AppEntry { Path = a.Path, Enabled = a.Enabled }).ToList()
         };

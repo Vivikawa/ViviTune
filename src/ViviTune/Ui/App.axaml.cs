@@ -108,6 +108,7 @@ namespace ViviTune.Ui
                 Ip = settings.Ip,
                 Port = settings.Port,
                 Mode = settings.Mode,
+                RouteAllTraffic = settings.RouteAllTraffic,
                 DirectPort = settings.DirectPort,
                 SettingsError = Settings.ValidateProxy(settings.Ip, settings.Port) ?? Settings.ValidateDirectPort(settings.DirectPort, settings.Port),
                 ListRunning = exclude => ProcessCatalog.Running(exclude).Select(a => (a.Path, a.Name, a.Background)),
@@ -251,6 +252,8 @@ namespace ViviTune.Ui
                 var since = session.ConnectedSince;
                 var live = session.Live;
                 state.DetailText = state.State != ConnState.Connected || since == null ? ""
+                    : settings.RouteAllTraffic
+                    ? $"{(DateTime.Now - since.Value):hh\\:mm\\:ss} · весь трафик через прокси"
                     : state.IsVless
                     ? ViewState.DetailVless(DateTime.Now - since.Value, state.Apps.Count(a => a.Enabled), settings.Lists.Count, settings.Sites.Count)
                     : ViewState.Detail(DateTime.Now - since.Value, session.UdpOk,
@@ -432,6 +435,13 @@ namespace ViviTune.Ui
                     else await Task.Run(session.Disconnect); // может ждать перезапуска до ~3 с: не в UI-потоке
                 }
                 catch (Exception e) { state.AddLog("Ошибка: " + e.Message); }
+            };
+            state.SetRouteAllTrafficRequested += on =>
+            {
+                if (session.State != ConnState.Disconnected) return;
+                settings.RouteAllTraffic = on;
+                state.RouteAllTraffic = on;
+                Save();
             };
             state.SetModeRequested += mode =>
             {

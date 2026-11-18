@@ -428,7 +428,7 @@ public sealed class Session : IDisposable
             // Копии новых списков качаем вне блокировок; уже имеющиеся (и у выключенных) используем снова.
             // Не загрузившийся при подключении или раньше заново не качаем: только включённые с прошлого применения.
             VlessPrep? newPrep = null;
-            if (snap.Mode == ProxyMode.Vless && p != null && vless != null)
+            if (!snap.RouteAllTraffic && snap.Mode == ProxyMode.Vless && p != null && vless != null)
             {
                 var missing = snap.Lists.Where(id => !prev.Lists.Contains(id) && !p.ListFiles.ContainsKey(id)).ToList();
                 if (missing.Count > 0)
@@ -480,17 +480,17 @@ public sealed class Session : IDisposable
     // Те же имена .exe в обоих списках программ и тот же набор списков сайтов (без учёта регистра и порядка) —
     // те же правила sing-box. Выходы при этом заново не проверяются.
     static bool SameRules(Settings a, Settings b) =>
-        Same(a.ProcessNames(), b.ProcessNames()) && Same(a.BypassNames(), b.BypassNames())
+        a.RouteAllTraffic == b.RouteAllTraffic && Same(a.ProcessNames(), b.ProcessNames()) && Same(a.BypassNames(), b.BypassNames())
         && Same(a.Lists, b.Lists) && Same(a.Sites, b.Sites);
 
     // Те же выходы: режим и какие из них нужны. Конфиг sing-box тот же, правила различаются только файлами.
-    static bool SameExits(Settings a, Settings b) => a.Mode == b.Mode && Needs(a) == Needs(b);
+    static bool SameExits(Settings a, Settings b) => a.Mode == b.Mode && a.RouteAllTraffic == b.RouteAllTraffic && Needs(a) == Needs(b);
 
     static bool Same(List<string> a, List<string> b) => a.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(b);
 
     // Какие списки непусты: в SOCKS5 — включённые программы «Через прокси» и «Мимо Podkop»;
     // в VLESS выход один, и ему нужны программы или списки сайтов.
-    static (bool Proxy, bool Bypass) Needs(Settings s) => s.Mode == ProxyMode.Vless
+    static (bool Proxy, bool Bypass) Needs(Settings s) => s.RouteAllTraffic ? (true, false) : s.Mode == ProxyMode.Vless
         ? (s.ProcessNames().Count > 0 || s.Lists.Count > 0 || s.Sites.Count > 0, false)
         : (s.ProcessNames().Count > 0, s.BypassNames().Count > 0);
 
@@ -576,7 +576,7 @@ public sealed class Session : IDisposable
     Verdict WithLists(Settings snap, VlessPrep basis)
     {
         var lists = new ListsResult(new Dictionary<string, string>(), [], []);
-        if (snap.Lists.Count > 0)
+        if (!snap.RouteAllTraffic && snap.Lists.Count > 0)
         {
             try { lists = vless!.PrepareLists(snap.Lists, basis.FetchProxy); }
             catch { lists = lists with { Failed = snap.Lists.ToList() }; } // не смогли даже начать: ни один не скачался
@@ -650,7 +650,7 @@ public sealed class Session : IDisposable
     // ошибка: правил для sing-box нет. Предупреждения — в порядке lists.Failed.
     public static Verdict EvaluateVless(Settings s, VlessPrep basis, ListsResult lists)
     {
-        if (s.ProcessNames().Count == 0 && s.Sites.Count == 0 && lists.Files.Count == 0) return ErrorVerdict("Списки не загрузились");
+        if (!s.RouteAllTraffic && s.ProcessNames().Count == 0 && s.Sites.Count == 0 && lists.Files.Count == 0) return ErrorVerdict("Списки не загрузились");
         var w = lists.Failed.Select(id => $"Список {ListName(id)} не загрузился").ToList();
         return new Verdict(new Exits(true, false), w, null, null, basis with { ListFiles = lists.Files, Apps = s.ProcessNames() });
     }
